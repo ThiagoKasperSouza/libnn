@@ -15,11 +15,11 @@ OBJS := $(SRCS:.c=.o)
 HDRS := $(wildcard include/*.h)
 LIB  := libnn.a
 
-TESTS := tests/test_arena tests/test_tensor
+TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo
 SAN_TESTS := $(TESTS:tests/%=tests/%_asan)
-EXAMPLES := examples/marco1_basics
+EXAMPLES := examples/marco1_basics examples/xor_perceptron examples/dae_example
 
-.PHONY: all lib tests test asan valgrind examples run_example clean
+.PHONY: all lib tests test asan valgrind examples run_example run_examples clean
 
 all: lib
 
@@ -42,23 +42,26 @@ examples/%: examples/%.c $(LIB) $(HDRS)
 
 examples: $(EXAMPLES)
 
-run_example: examples
-	./examples/marco1_basics
+run_example: run_examples
+
+run_examples: $(EXAMPLES)
+	@for e in $(EXAMPLES); do ./$$e || exit 1; done
 
 tests: $(TESTS)
 
 test: tests
-	./tests/test_arena
-	./tests/test_tensor
+	@for t in $(TESTS); do ./$$t || exit 1; done
 
 asan: $(SAN_TESTS)
-	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./tests/test_arena_asan
-	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./tests/test_tensor_asan
+	@for t in $(SAN_TESTS); do \
+		ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./$$t || exit 1; \
+	done
 
 valgrind: tests
 	@if command -v valgrind >/dev/null 2>&1; then \
-		valgrind --error-exitcode=42 --leak-check=full --show-leak-kinds=all ./tests/test_arena && \
-		valgrind --error-exitcode=42 --leak-check=full --show-leak-kinds=all ./tests/test_tensor; \
+		for t in $(TESTS); do \
+			valgrind --error-exitcode=42 --leak-check=full --show-leak-kinds=all ./$$t || exit 1; \
+		done; \
 	else \
 		echo "valgrind não instalado; use 'make asan'."; \
 	fi

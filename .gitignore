@@ -6,4 +6,10 @@ tests/test_arena
 tests/test_tensor
 tests/test_arena_asan
 tests/test_tensor_asan
+tests/test_autograd
+tests/test_autograd_asan
+tests/test_zoo
+tests/test_zoo_asan
 examples/marco1_basics
+examples/xor_perceptron
+examples/dae_example

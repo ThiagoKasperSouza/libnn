@@ -2,14 +2,14 @@
 
 SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdlib`, `math`, `string`, `stdint`, `stddef`, `stdbool`). A arquitetura completa e o roadmap estão em [`Plano de Arquitetura_ SDK de Redes Neurais em C Puro (Zero Dependências).md`](./Plano%20de%20Arquitetura_%20SDK%20de%20Redes%20Neurais%20em%20C%20Puro%20%28Zero%20Depend%C3%AAncias%29.md).
 
-**Status:** Marco 1 (infraestrutura base) implementado. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md).
+**Status:** Marcos 1 e 2 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md) e [`docs/MARCO2.md`](./docs/MARCO2.md).
 
 ## Marcos
 
 | Marco | Escopo | Estado |
 | :-- | :-- | :-- |
 | 1 | Arena, tensores, matmul com tiling, RNG, testes de memória | ✅ implementado |
-| 2 | Tape de autograd, Adam, P/FF/DFF/AE/DAE/SAE/DRN | ⏳ |
+| 2 | Tape de autograd, Adam, P/FF/DFF/AE/DAE/SAE/DRN | ✅ implementado |
 | 3 | `im2col` + GEMM, conv transposta, pooling, DCN/DN/DCIGN/GAN | ⏳ |
 | 4 | Unrolling temporal, BPTT, LSTM/GRU/NTM | ⏳ |
 | 5 | Energia, spiking e reservatórios | ⏳ |
@@ -22,8 +22,8 @@ make          # compila libnn.a
 make test     # testes funcionais e de estresse de memória
 make asan     # mesmos testes com AddressSanitizer + UBSan
 make valgrind # se valgrind estiver disponível
-make examples # compila os exemplos
-make run_example
+make examples     # compila os exemplos
+make run_examples # executa os três exemplos
 make clean
 ```
 
@@ -36,18 +36,26 @@ libnn/
 ├── include/
 │   ├── neurochart.h   # header público unificado
 │   ├── nc_arena.h     # arena allocator
-│   └── nc_tensor.h    # tensores, RNG e álgebra linear
-├── src/
-│   ├── nc_arena.c
-│   └── nc_tensor.c
+│   ├── nc_tensor.h    # tensores, RNG e álgebra linear
+│   ├── nc_autograd.h  # fita e operações diferenciáveis
+│   ├── nc_cells.h     # 13 tipos de célula e ativações
+│   ├── nc_topology.h  # NC_Graph, arestas e forward/backward
+│   ├── nc_trainers.h  # Adam e MSE
+│   └── nc_zoo.h       # construtores P/FF/DFF/AE/DAE/SAE/DRN
+├── src/                # um .c por header acima (exceto neurochart.h)
 ├── examples/
-│   └── marco1_basics.c
+│   ├── marco1_basics.c
+│   ├── xor_perceptron.c
+│   └── dae_example.c
 ├── tests/
 │   ├── test_common.h
 │   ├── test_arena.c
-│   └── test_tensor.c
+│   ├── test_tensor.c
+│   ├── test_autograd.c
+│   └── test_zoo.c
 ├── docs/
-│   └── MARCO1.md
+│   ├── MARCO1.md
+│   └── MARCO2.md
 ├── Makefile
 └── README.md
 ```
@@ -68,21 +76,29 @@ A alocação é sequencial e alinhada (32 bytes por padrão, AVX2). Não há `fr
 
 NC_Arena model = nc_arena_init(16u * 1024 * 1024);
 NC_Arena scratch = nc_arena_init(4u * 1024 * 1024);
+nc_rng_seed(42);
 
-nc_rng_seed(42); /* determinístico */
-size_t shape[2] = { 2, 3 };
-NC_Tensor *w = nc_tensor_create(&model, shape, 2, true);
-nc_tensor_fill_random_normal(w, 0.0f, 0.1f);
+NC_Graph *net = nc_zoo_create_ff(&model, 2, 8, 1);
+NC_Tensor *x = /* ... entradas na model arena ... */;
+NC_Tensor *y = /* ... alvos na model arena ... */;
+NC_OptimizerAdam opt = { 0.05f, 0.9f, 0.999f, 1e-8f };
 
-/* ... montar x e y na scratch ... */
-nc_matmul(w, x, y);
+for (size_t epoch = 0; epoch < 1000; ++epoch) {
+    nc_arena_reset(&scratch);                       /* O(1) */
+    NC_Tensor *pred = nc_graph_forward(net, x, &scratch);
+    nc_autograd_record_mse(net->tape, pred, y);     /* semente do gradiente */
+    nc_graph_backward(net);
+    nc_train_backprop_step(net, &opt);
+}
 
-nc_arena_reset(&scratch); /* O(1) por iteração */
+nc_graph_destroy(net);
 nc_arena_free(&scratch);
 nc_arena_free(&model);
 ```
 
-Exemplo completo e executável: [`examples/marco1_basics.c`](./examples/marco1_basics.c).
+Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
+[`examples/xor_perceptron.c`](./examples/xor_perceptron.c) e
+[`examples/dae_example.c`](./examples/dae_example.c).
 
 ## API do Marco 1
 
@@ -107,13 +123,36 @@ Exemplo completo e executável: [`examples/marco1_basics.c`](./examples/marco1_b
 | `nc_matmul(A, B, C)` | GEMM com tiling; lida com aliasing entre `C` e as entradas |
 | `nc_conv2d / conv2d_transpose / max_pool2d` | Operações 2D sobre tensores `[N,C,H,W]` |
 
+## API do Marco 2
+
+### Autograd e células
+
+| Função | Contrato |
+| :-- | :-- |
+| `nc_autograd_tape_init(arena, capacity)` | Fita na arena persistente; `NULL` em falha |
+| `nc_autograd_tape_reset / backward` | Reinicia a fita / roda os nós em ordem reversa |
+| `nc_nn_matmul / add / activation / dropout` | Forward + gravação do nó na fita |
+| `nc_compute_mse_loss / nc_autograd_record_mse` | Erro quadrático médio e semente de gradiente |
+| `nc_cell_create / nc_cell_init_params / nc_cell_forward` | Célula tipada com pesos Xavier e ativação |
+
+### Grafo, treino e zoo
+
+| Função | Contrato |
+| :-- | :-- |
+| `nc_graph_create / add_cell / connect` | Monta o DAG na model arena |
+| `nc_graph_forward(g, input, scratch)` | Achata a entrada para `[batch, features]` e executa as células |
+| `nc_graph_backward(g)` | Aplica sparsity (SAE) e propaga gradientes |
+| `nc_train_backprop_step(g, opt)` | Adam com correção de viés; estados criados na primeira chamada |
+| `nc_zoo_create_{perceptron,ff,dff,ae,dae,sae,drn}` | Fábricas das 7 topologias do Marco 2 |
+
 ## Validação
 
-`make test` executa testes de alinhamento, esgotamento, reset, estresse com milhares de blocos, RNG, GEMM (comparado com referência ingênua), aliasing, views com strides não-unitários, convolução, transposta, pooling e casos-limite. `make asan` roda a mesma suíte com ASan/UBSan e detecção de vazamentos.
+`make test` cobre os quatro binários: arena/tensores (Marco 1), gradientes analíticos vs. diferenças finitas, MSE/dropout/ativações, estrutura das 7 topologias, treino de XOR até erro ~0 e reconstrução AE/DAE/SAE/DRN com perda decrescente. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
 
 ## Limitações conhecidas
 
 - `nc_conv2d` usa loops diretos; `im2col + GEMM` está previsto para o Marco 3.
 - O RNG é estado global, não thread-safe.
 - Alias entre `C` e as entradas de `nc_matmul` usa `malloc` temporário (caminho excepcional, fora do hot path).
-- O módulo `nc_render` e as topologias do `nc_zoo` ainda não existem.
+- O Marco 2 implementa apenas as células `INPUT`, `NOISY_INPUT`, `HIDDEN`, `OUTPUT` e `MATCH_INPUT_OUTPUT`; as demais (probabilística, spiking, recorrentes, kernel) chegam nos marcos 3–5.
+- `nc_render` (SVG) ainda não existe — está previsto para o Marco 6.
