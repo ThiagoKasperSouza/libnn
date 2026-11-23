@@ -1,0 +1,9 @@
+# Artefatos de build
+*.o
+*.a
+libnn.a
+tests/test_arena
+tests/test_tensor
+tests/test_arena_asan
+tests/test_tensor_asan
+examples/marco1_basics
