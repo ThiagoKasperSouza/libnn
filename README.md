@@ -22,8 +22,9 @@ make          # compila libnn.a
 make test     # testes funcionais e de estresse de memória
 make asan     # mesmos testes com AddressSanitizer + UBSan
 make valgrind # se valgrind estiver disponível
-make examples     # compila os exemplos
-make run_examples # executa os três exemplos
+make apps                         # compila todas as aplicações
+make run_apps                     # executa todas
+make run_apps APP=xor-classifier  # executa apenas uma
 make clean
 ```
 
@@ -45,13 +46,15 @@ libnn/
 │   └── nc_zoo.h       # construtores das 11 topologias implementadas
 ├── src/                # um .c por header acima (exceto neurochart.h)
 ├── examples/
-│   ├── marco1_basics.c
-│   ├── xor_perceptron.c
-│   ├── dae_example.c
-│   ├── dcn_synthetic.c
-│   ├── gan_toy.c
-│   ├── lstm_sequence.c
-│   └── ntm_demo.c
+│   ├── README.md       # índice das aplicações
+│   └── apps/            # uma pasta por aplicação, com main.c + README.md
+│       ├── tensor-basics/
+│       ├── xor-classifier/
+│       ├── denoising-autoencoder/
+│       ├── image-classifier/
+│       ├── gan-toy/
+│       ├── sequence-copy/
+│       └── ntm-memory/
 ├── tests/
 │   ├── test_common.h
 │   ├── test_arena.c
@@ -105,11 +108,7 @@ nc_arena_free(&scratch);
 nc_arena_free(&model);
 ```
 
-Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
-[`examples/xor_perceptron.c`](./examples/xor_perceptron.c),
-[`examples/dae_example.c`](./examples/dae_example.c),
-[`examples/dcn_synthetic.c`](./examples/dcn_synthetic.c) e
-[`examples/gan_toy.c`](./examples/gan_toy.c).
+Exemplos completos: o índice em [`examples/README.md`](./examples/README.md) lista as sete aplicações, cada uma com `main.c` e um README explicando a arquitetura, os dados e como treinar.
 
 ## API do Marco 1
 

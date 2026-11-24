@@ -18,11 +18,15 @@ LIB  := libnn.a
 TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo \
          tests/test_spatial tests/test_sequence
 SAN_TESTS := $(TESTS:tests/%=tests/%_asan)
-EXAMPLES := examples/marco1_basics examples/xor_perceptron examples/dae_example \
-            examples/dcn_synthetic examples/gan_toy \
-            examples/lstm_sequence examples/ntm_demo
+EXAMPLES := examples/apps/tensor-basics/tensor-basics \
+            examples/apps/xor-classifier/xor-classifier \
+            examples/apps/denoising-autoencoder/denoising-autoencoder \
+            examples/apps/image-classifier/image-classifier \
+            examples/apps/gan-toy/gan-toy \
+            examples/apps/sequence-copy/sequence-copy \
+            examples/apps/ntm-memory/ntm-memory
 
-.PHONY: all lib tests test asan valgrind examples run_example run_examples clean
+.PHONY: all lib tests test asan valgrind examples apps run_example run_examples run_apps clean
 
 all: lib
 
@@ -40,15 +44,31 @@ tests/test_%: tests/test_%.c $(LIB) $(HDRS)
 tests/test_%_asan: tests/test_%.c $(SRCS) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SANFLAGS) $< $(SRCS) -lm -o $@
 
-examples/%: examples/%.c $(LIB) $(HDRS)
+examples/apps/tensor-basics/tensor-basics: examples/apps/tensor-basics/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/xor-classifier/xor-classifier: examples/apps/xor-classifier/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/denoising-autoencoder/denoising-autoencoder: examples/apps/denoising-autoencoder/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/image-classifier/image-classifier: examples/apps/image-classifier/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/gan-toy/gan-toy: examples/apps/gan-toy/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/sequence-copy/sequence-copy: examples/apps/sequence-copy/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/ntm-memory/ntm-memory: examples/apps/ntm-memory/main.c $(LIB) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
 
-examples: $(EXAMPLES)
+examples apps: $(EXAMPLES)
 
 run_example: run_examples
 
-run_examples: $(EXAMPLES)
-	@for e in $(EXAMPLES); do ./$$e || exit 1; done
+run_examples run_apps: $(EXAMPLES)
+	@if [ -n "$(APP)" ]; then \
+		./examples/apps/$(APP)/$(APP); \
+	else \
+		for e in $(EXAMPLES); do ./$$e || exit 1; done; \
+	fi
 
 tests: $(TESTS)
 

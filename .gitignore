@@ -14,10 +14,10 @@ tests/test_spatial
 tests/test_spatial_asan
 tests/test_sequence
 tests/test_sequence_asan
-examples/marco1_basics
-examples/xor_perceptron
-examples/dae_example
-examples/dcn_synthetic
-examples/gan_toy
-examples/lstm_sequence
-examples/ntm_demo
+examples/apps/tensor-basics/tensor-basics
+examples/apps/xor-classifier/xor-classifier
+examples/apps/denoising-autoencoder/denoising-autoencoder
+examples/apps/image-classifier/image-classifier
+examples/apps/gan-toy/gan-toy
+examples/apps/sequence-copy/sequence-copy
+examples/apps/ntm-memory/ntm-memory
