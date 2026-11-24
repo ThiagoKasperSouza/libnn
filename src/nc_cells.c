@@ -50,6 +50,36 @@ bool nc_cell_init_params(NC_Cell *cell, NC_Arena *arena,
     return true;
 }
 
+bool nc_cell_init_conv_params(NC_Cell *cell, NC_Arena *arena,
+                              size_t c_out, size_t c_in,
+                              size_t k_h, size_t k_w, bool with_bias)
+{
+    if (cell == NULL || arena == NULL || c_out == 0 || c_in == 0 ||
+        k_h == 0 || k_w == 0) {
+        return false;
+    }
+    const size_t shape[4] = { c_out, c_in, k_h, k_w };
+    NC_Tensor *w = nc_tensor_create(arena, shape, 4, true);
+    if (w == NULL) {
+        return false;
+    }
+    const float fan_in = (float)(c_in * k_h * k_w);
+    const float fan_out = (float)(c_out * k_h * k_w);
+    nc_tensor_fill_random_normal(w, 0.0f, sqrtf(2.0f / (fan_in + fan_out)));
+    cell->weights = w;
+
+    if (with_bias) {
+        const size_t b_shape[2] = { 1, c_out };
+        cell->bias = nc_tensor_create(arena, b_shape, 2, true);
+        if (cell->bias == NULL) {
+            cell->weights = NULL;
+            return false;
+        }
+        nc_tensor_fill_zeros(cell->bias);
+    }
+    return true;
+}
+
 static NC_OpType op_from_activation(NC_Activation activation)
 {
     switch (activation) {
@@ -118,14 +148,84 @@ NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
     case NC_CELL_NOISY_INPUT:
         cell->activity = noisy_input_forward(cell, input, tape, scratch);
         return cell->activity;
-    case NC_CELL_HIDDEN:
-    case NC_CELL_OUTPUT:
     case NC_CELL_MATCH_INPUT_OUTPUT:
+        /* Sem pesos, atua como pass-through (saída de redes de reconstrução). */
+        if (cell->weights == NULL) {
+            cell->activity = nc_nn_identity(tape, scratch, input);
+            return cell->activity;
+        }
+        /* Com pesos, comporta-se como uma camada densa (AE/DAE). */
+        /* fallthrough */
+    case NC_CELL_HIDDEN:
+    case NC_CELL_OUTPUT: {
+        const NC_Tensor *dense_input = input;
+        if (input->ndim == 4) {
+            NC_Tensor *flat = nc_tensor_flatten(scratch, input,
+                                                input->grad != NULL);
+            if (flat == NULL) {
+                return NULL;
+            }
+            dense_input = nc_nn_activation(tape, scratch, flat, NC_OP_LINEAR);
+            if (dense_input == NULL) {
+                return NULL;
+            }
+        }
         if (cell->weights == NULL) {
             return NULL;
         }
-        cell->activity = affine_forward(cell, input, tape, scratch);
+        cell->activity = affine_forward(cell, dense_input, tape, scratch);
         return cell->activity;
+    }
+    case NC_CELL_KERNEL:
+        if (cell->weights == NULL || input->ndim != 4) {
+            return NULL;
+        }
+        cell->activity = nc_nn_conv2d(tape, scratch, input, cell->weights,
+                                      cell->state.conv.stride,
+                                      cell->state.conv.padding);
+        return cell->activity;
+    case NC_CELL_CONV_OR_POOL:
+        if (input->ndim != 4) {
+            return NULL;
+        }
+        if (cell->state.conv.is_pool) {
+            cell->activity = cell->state.conv.avg_pool
+                ? nc_nn_avg_pool2d(tape, scratch, input,
+                                   cell->state.conv.pool_kernel,
+                                   cell->state.conv.pool_stride)
+                : nc_nn_max_pool2d(tape, scratch, input,
+                                   cell->state.conv.pool_kernel,
+                                   cell->state.conv.pool_stride);
+        } else if (cell->weights != NULL) {
+            cell->activity = cell->state.conv.transpose
+                ? nc_nn_conv2d_transpose(tape, scratch, input, cell->weights,
+                                         cell->state.conv.stride,
+                                         cell->state.conv.padding)
+                : nc_nn_conv2d(tape, scratch, input, cell->weights,
+                               cell->state.conv.stride,
+                               cell->state.conv.padding);
+        } else {
+            return NULL;
+        }
+        return cell->activity;
+    case NC_CELL_PROBABILISTIC_HIDDEN: {
+        /* Latente determinístico neste marco: mu = x. Amostragem e KL (VAE)
+         * pertencem ao Marco 5; os tensores de estado já são reservados. */
+        if (cell->state.probabilistic.mu == NULL) {
+            const size_t shape[4] = { input->shape[0], input->shape[1],
+                                      input->shape[2] ? input->shape[2] : 1,
+                                      input->shape[3] ? input->shape[3] : 1 };
+            const size_t ndim = input->ndim;
+            cell->state.probabilistic.mu =
+                nc_tensor_create(scratch, shape, ndim, false);
+            cell->state.probabilistic.log_var =
+                nc_tensor_create(scratch, shape, ndim, false);
+            cell->state.probabilistic.eps =
+                nc_tensor_create(scratch, shape, ndim, false);
+        }
+        cell->activity = nc_nn_identity(tape, scratch, input);
+        return cell->activity;
+    }
     default:
         /* Células recorrentes/energéticas/spiking pertencem a marcos futuros. */
         return NULL;

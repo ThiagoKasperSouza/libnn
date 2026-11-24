@@ -16,7 +16,11 @@ typedef enum {
     NC_OP_GELU,
     NC_OP_DROPOUT,
     NC_OP_MSE,
-    NC_OP_LINEAR
+    NC_OP_LINEAR,
+    NC_OP_CONV2D,
+    NC_OP_CONV_TRANSPOSE,
+    NC_OP_MAXPOOL,
+    NC_OP_AVGPOOL
 } NC_OpType;
 
 struct NC_TapeNode;
@@ -28,7 +32,11 @@ typedef struct NC_OpParams {
     NC_OpType op;
     NC_Tensor *target; /* NC_OP_MSE */
     NC_Tensor *mask;   /* NC_OP_DROPOUT */
+    size_t *pool_indices; /* NC_OP_MAXPOOL: offsets exatos do máximo */
     float scale;       /* fator de escala do gradiente (ex.: 2/size) */
+    size_t stride;     /* convolução/pooling */
+    size_t padding;    /* convolução */
+    size_t kernel_size;/* pooling */
 } NC_OpParams;
 
 typedef struct NC_TapeNode {
@@ -74,6 +82,23 @@ NC_Tensor *nc_nn_activation(NC_Tape *tape, NC_Arena *scratch,
                             const NC_Tensor *x, NC_OpType op);
 NC_Tensor *nc_nn_dropout(NC_Tape *tape, NC_Arena *scratch,
                          const NC_Tensor *x, float keep_prob);
+
+/* Identidade diferenciável para qualquer ndim (1–4). */
+NC_Tensor *nc_nn_identity(NC_Tape *tape, NC_Arena *scratch,
+                          const NC_Tensor *x);
+
+NC_Tensor *nc_nn_conv2d(NC_Tape *tape, NC_Arena *scratch,
+                        const NC_Tensor *input, const NC_Tensor *kernel,
+                        size_t stride, size_t padding);
+NC_Tensor *nc_nn_conv2d_transpose(NC_Tape *tape, NC_Arena *scratch,
+                                  const NC_Tensor *input, const NC_Tensor *kernel,
+                                  size_t stride, size_t padding);
+NC_Tensor *nc_nn_max_pool2d(NC_Tape *tape, NC_Arena *scratch,
+                            const NC_Tensor *input, size_t kernel_size,
+                            size_t stride);
+NC_Tensor *nc_nn_avg_pool2d(NC_Tape *tape, NC_Arena *scratch,
+                            const NC_Tensor *input, size_t kernel_size,
+                            size_t stride);
 
 /* Semente de gradiente do erro de reconstrução (MSE). */
 void nc_autograd_record_mse(NC_Tape *tape, const NC_Tensor *pred,

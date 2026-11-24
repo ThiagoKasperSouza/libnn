@@ -666,3 +666,394 @@ void nc_max_pool2d(const NC_Tensor *input, NC_Tensor *output,
         }
     }
 }
+
+/* ------------------- Operações espaciais do Marco 3 ------------------- */
+
+bool nc_conv2d_output_shape(const NC_Tensor *input, const NC_Tensor *kernel,
+                            size_t stride, size_t padding, size_t out_shape[4])
+{
+    if (input == NULL || kernel == NULL || out_shape == NULL ||
+        input->ndim != 4 || kernel->ndim != 4 || stride == 0 ||
+        !nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(kernel) ||
+        kernel->shape[1] != input->shape[1] ||
+        kernel->shape[2] == 0 || kernel->shape[3] == 0) {
+        return false;
+    }
+    size_t two_pad, padded_h, padded_w;
+    if (!checked_mul(padding, 2, &two_pad) ||
+        !checked_add(input->shape[2], two_pad, &padded_h) ||
+        !checked_add(input->shape[3], two_pad, &padded_w) ||
+        padded_h < kernel->shape[2] || padded_w < kernel->shape[3]) {
+        return false;
+    }
+    out_shape[0] = input->shape[0];
+    out_shape[1] = kernel->shape[0];
+    out_shape[2] = (padded_h - kernel->shape[2]) / stride + 1;
+    out_shape[3] = (padded_w - kernel->shape[3]) / stride + 1;
+    return out_shape[1] != 0 && out_shape[2] != 0 && out_shape[3] != 0;
+}
+
+bool nc_conv2d_transpose_output_shape(const NC_Tensor *input,
+                                      const NC_Tensor *kernel, size_t stride,
+                                      size_t padding, size_t out_shape[4])
+{
+    if (input == NULL || kernel == NULL || out_shape == NULL ||
+        input->ndim != 4 || kernel->ndim != 4 || stride == 0 ||
+        !nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(kernel) ||
+        kernel->shape[0] != input->shape[1] || kernel->shape[1] == 0 ||
+        kernel->shape[2] == 0 || kernel->shape[3] == 0) {
+        return false;
+    }
+    size_t two_pad, base_h, span_h, base_w, span_w;
+    if (!checked_mul(padding, 2, &two_pad) ||
+        !checked_mul(input->shape[2] - 1, stride, &base_h) ||
+        !checked_add(base_h, kernel->shape[2], &span_h) ||
+        !checked_mul(input->shape[3] - 1, stride, &base_w) ||
+        !checked_add(base_w, kernel->shape[3], &span_w) ||
+        span_h < two_pad || span_w < two_pad) {
+        return false;
+    }
+    out_shape[0] = input->shape[0];
+    out_shape[1] = kernel->shape[1];
+    out_shape[2] = span_h - two_pad;
+    out_shape[3] = span_w - two_pad;
+    return out_shape[2] != 0 && out_shape[3] != 0;
+}
+
+bool nc_pool_output_shape(const NC_Tensor *input, size_t kernel_size,
+                          size_t stride, size_t out_shape[4])
+{
+    if (input == NULL || out_shape == NULL || input->ndim != 4 ||
+        kernel_size == 0 || stride == 0 ||
+        !nc_tensor_layout_valid(input) ||
+        input->shape[2] < kernel_size || input->shape[3] < kernel_size) {
+        return false;
+    }
+    out_shape[0] = input->shape[0];
+    out_shape[1] = input->shape[1];
+    out_shape[2] = (input->shape[2] - kernel_size) / stride + 1;
+    out_shape[3] = (input->shape[3] - kernel_size) / stride + 1;
+    return true;
+}
+
+NC_Tensor *nc_tensor_flatten(NC_Arena *scratch, const NC_Tensor *t,
+                             bool requires_grad)
+{
+    if (scratch == NULL || !nc_tensor_layout_valid(t) ||
+        (requires_grad && t->grad == NULL)) {
+        return NULL; /* sem buffer de gradiente não há como compartilhá-lo */
+    }
+    /* Para [N,C,H,W], o resultado é [N, C*H*W] (não [N*C, H*W]). */
+    const size_t batch = t->shape[0];
+    size_t features = 1;
+    for (size_t i = 1; i < t->ndim; ++i) {
+        if (features > SIZE_MAX / t->shape[i]) {
+            return NULL;
+        }
+        features *= t->shape[i];
+    }
+
+    NC_Tensor *view = (NC_Tensor *)nc_arena_alloc(scratch, sizeof(*view),
+                                                  alignof(NC_Tensor));
+    if (view == NULL) {
+        return NULL;
+    }
+    *view = *t;
+    view->ndim = 2;
+    view->shape[0] = batch;
+    view->shape[1] = features;
+    view->shape[2] = 0;
+    view->shape[3] = 0;
+    view->strides[0] = features;
+    view->strides[1] = 1;
+    view->strides[2] = 0;
+    view->strides[3] = 0;
+    view->size = batch * features;
+    view->requires_grad = requires_grad;
+    /* Compartilha o buffer de gradiente com o tensor original: assim o
+     * backward de uma camada densa alcança a ativação convolucional. */
+    view->grad = requires_grad ? t->grad : NULL;
+    return view;
+}
+
+void nc_avg_pool2d(const NC_Tensor *input, NC_Tensor *output,
+                   size_t kernel_size, size_t stride)
+{
+    if (input == NULL || output == NULL || input->ndim != 4 ||
+        output->ndim != 4 || kernel_size == 0 || stride == 0 ||
+        !nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(output)) {
+        return;
+    }
+    const size_t h = input->shape[2];
+    const size_t w = input->shape[3];
+    if (h < kernel_size || w < kernel_size) {
+        return;
+    }
+    const size_t o_h = (h - kernel_size) / stride + 1;
+    const size_t o_w = (w - kernel_size) / stride + 1;
+    if (output->shape[0] != input->shape[0] ||
+        output->shape[1] != input->shape[1] ||
+        output->shape[2] != o_h || output->shape[3] != o_w) {
+        return;
+    }
+    const float inv = 1.0f / (float)(kernel_size * kernel_size);
+
+    for (size_t n = 0; n < input->shape[0]; ++n) {
+        for (size_t c = 0; c < input->shape[1]; ++c) {
+            for (size_t oh = 0; oh < o_h; ++oh) {
+                for (size_t ow = 0; ow < o_w; ++ow) {
+                    float sum = 0.0f;
+                    for (size_t kh = 0; kh < kernel_size; ++kh) {
+                        for (size_t kw = 0; kw < kernel_size; ++kw) {
+                            const size_t off =
+                                n * input->strides[0] + c * input->strides[1] +
+                                (oh * stride + kh) * input->strides[2] +
+                                (ow * stride + kw) * input->strides[3];
+                            sum += input->data[off];
+                        }
+                    }
+                    const size_t off =
+                        n * output->strides[0] + c * output->strides[1] +
+                        oh * output->strides[2] + ow * output->strides[3];
+                    output->data[off] = sum * inv;
+                }
+            }
+        }
+    }
+}
+
+void nc_conv2d_im2col(NC_Arena *scratch, const NC_Tensor *input,
+                      const NC_Tensor *kernel, NC_Tensor *output,
+                      size_t stride, size_t padding)
+{
+    size_t o_h, o_w;
+    if (scratch == NULL ||
+        !conv_input_shapes(input, kernel, output, stride, padding, &o_h, &o_w) ||
+        output->shape[1] != kernel->shape[0]) {
+        return;
+    }
+
+    const size_t n = input->shape[0];
+    const size_t c_in = input->shape[1];
+    const size_t h = input->shape[2];
+    const size_t w = input->shape[3];
+    const size_t c_out = kernel->shape[0];
+    const size_t k_h = kernel->shape[2];
+    const size_t k_w = kernel->shape[3];
+
+    size_t k_depth, cols, kernel_elems, col_elems, out_elems;
+    if (!checked_mul(c_in, k_h, &k_depth) ||
+        !checked_mul(k_depth, k_w, &k_depth) ||
+        !checked_mul(n, o_h, &cols) ||
+        !checked_mul(cols, o_w, &cols) ||
+        !checked_mul(c_out, k_depth, &kernel_elems) ||
+        !checked_mul(k_depth, cols, &col_elems) ||
+        !checked_mul(c_out, cols, &out_elems)) {
+        return;
+    }
+
+    float *col_data = (float *)nc_arena_alloc(scratch, col_elems * sizeof(float),
+                                              NC_TENSOR_ALIGNMENT);
+    float *out_data = (float *)nc_arena_alloc(scratch, out_elems * sizeof(float),
+                                              NC_TENSOR_ALIGNMENT);
+    if (col_data == NULL || out_data == NULL) {
+        return;
+    }
+    memset(col_data, 0, col_elems * sizeof(float)); /* posições de padding */
+
+    /* col[(c,kh,kw), (n,oh,ow)] */
+    for (size_t ni = 0; ni < n; ++ni) {
+        for (size_t oh = 0; oh < o_h; ++oh) {
+            for (size_t ow = 0; ow < o_w; ++ow) {
+                const size_t col_index = (ni * o_h + oh) * o_w + ow;
+                for (size_t ci = 0; ci < c_in; ++ci) {
+                    for (size_t kh = 0; kh < k_h; ++kh) {
+                        const size_t ih = oh * stride + kh;
+                        if (ih < padding || ih >= h + padding) {
+                            continue;
+                        }
+                        for (size_t kw = 0; kw < k_w; ++kw) {
+                            const size_t iw = ow * stride + kw;
+                            if (iw < padding || iw >= w + padding) {
+                                continue;
+                            }
+                            const size_t in_off =
+                                ni * input->strides[0] + ci * input->strides[1] +
+                                (ih - padding) * input->strides[2] +
+                                (iw - padding) * input->strides[3];
+                            col_data[((ci * k_h + kh) * k_w + kw) * cols + col_index] =
+                                input->data[in_off];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    NC_Tensor col = { 0 }, kernel_view = { 0 }, out_matrix = { 0 };
+    col.data = col_data;
+    col.ndim = 2; col.shape[0] = k_depth; col.shape[1] = cols;
+    col.strides[0] = cols; col.strides[1] = 1;
+    col.size = col_elems;
+
+    kernel_view.data = kernel->data;
+    kernel_view.ndim = 2; kernel_view.shape[0] = c_out; kernel_view.shape[1] = k_depth;
+    kernel_view.strides[0] = k_depth; kernel_view.strides[1] = 1;
+    kernel_view.size = kernel_elems;
+
+    out_matrix.data = out_data;
+    out_matrix.ndim = 2; out_matrix.shape[0] = c_out; out_matrix.shape[1] = cols;
+    out_matrix.strides[0] = cols; out_matrix.strides[1] = 1;
+    out_matrix.size = out_elems;
+
+    nc_matmul(&kernel_view, &col, &out_matrix);
+
+    for (size_t ni = 0; ni < n; ++ni) {
+        for (size_t oc = 0; oc < c_out; ++oc) {
+            for (size_t oh = 0; oh < o_h; ++oh) {
+                for (size_t ow = 0; ow < o_w; ++ow) {
+                    const size_t out_off =
+                        ni * output->strides[0] + oc * output->strides[1] +
+                        oh * output->strides[2] + ow * output->strides[3];
+                    output->data[out_off] =
+                        out_data[oc * cols + (ni * o_h + oh) * o_w + ow];
+                }
+            }
+        }
+    }
+}
+
+void nc_conv2d_transpose_im2col(NC_Arena *scratch, const NC_Tensor *input,
+                                const NC_Tensor *kernel, NC_Tensor *output,
+                                size_t stride, size_t padding)
+{
+    if (scratch == NULL || input == NULL || kernel == NULL || output == NULL ||
+        input->ndim != 4 || kernel->ndim != 4 || output->ndim != 4 ||
+        stride == 0 || !nc_tensor_layout_valid(input) ||
+        !nc_tensor_layout_valid(kernel) || !nc_tensor_layout_valid(output)) {
+        return;
+    }
+
+    const size_t n = input->shape[0];
+    const size_t c_in = input->shape[1];
+    const size_t h = input->shape[2];
+    const size_t w = input->shape[3];
+    const size_t k_h = kernel->shape[2];
+    const size_t k_w = kernel->shape[3];
+    if (kernel->shape[0] != c_in || kernel->shape[1] == 0 || k_h == 0 || k_w == 0) {
+        return;
+    }
+    const size_t c_out = kernel->shape[1];
+
+    size_t two_pad, base_h, span_h, base_w, span_w;
+    if (!checked_mul(padding, 2, &two_pad) ||
+        !checked_mul(h - 1, stride, &base_h) ||
+        !checked_add(base_h, k_h, &span_h) ||
+        !checked_mul(w - 1, stride, &base_w) ||
+        !checked_add(base_w, k_w, &span_w) ||
+        span_h < two_pad || span_w < two_pad) {
+        return;
+    }
+    const size_t out_h = span_h - two_pad;
+    const size_t out_w = span_w - two_pad;
+    if (out_h == 0 || out_w == 0 ||
+        output->shape[0] != n || output->shape[1] != c_out ||
+        output->shape[2] != out_h || output->shape[3] != out_w) {
+        return;
+    }
+
+    size_t k_plane, kout, kmat_elems, spatial, in_elems, result_elems;
+    if (!checked_mul(k_h, k_w, &k_plane) ||
+        !checked_mul(c_out, k_plane, &kout) ||          /* colunas por canal de entrada */
+        !checked_mul(c_in, kout, &kmat_elems) ||
+        !checked_mul(n, h, &spatial) ||
+        !checked_mul(spatial, w, &spatial) ||
+        !checked_mul(c_in, spatial, &in_elems) ||
+        !checked_mul(kout, spatial, &result_elems)) {
+        return;
+    }
+
+    float *kmat = (float *)nc_arena_alloc(scratch, kmat_elems * sizeof(float),
+                                          NC_TENSOR_ALIGNMENT);
+    float *imat = (float *)nc_arena_alloc(scratch, in_elems * sizeof(float),
+                                          NC_TENSOR_ALIGNMENT);
+    float *result = (float *)nc_arena_alloc(scratch, result_elems * sizeof(float),
+                                            NC_TENSOR_ALIGNMENT);
+    if (kmat == NULL || imat == NULL || result == NULL) {
+        return;
+    }
+
+    /* kmat[ic, (oc,kh,kw)] = kernel[ic,oc,kh,kw] */
+    for (size_t ic = 0; ic < c_in; ++ic) {
+        for (size_t oc = 0; oc < c_out; ++oc) {
+            for (size_t kh = 0; kh < k_h; ++kh) {
+                for (size_t kw = 0; kw < k_w; ++kw) {
+                    const size_t koff =
+                        ic * kernel->strides[0] + oc * kernel->strides[1] +
+                        kh * kernel->strides[2] + kw * kernel->strides[3];
+                    kmat[ic * kout + (oc * k_h + kh) * k_w + kw] =
+                        kernel->data[koff];
+                }
+            }
+        }
+    }
+    /* imat[ic, (n,ih,iw)] */
+    for (size_t ni = 0; ni < n; ++ni) {
+        for (size_t ic = 0; ic < c_in; ++ic) {
+            for (size_t ih = 0; ih < h; ++ih) {
+                for (size_t iw = 0; iw < w; ++iw) {
+                    const size_t in_off =
+                        ni * input->strides[0] + ic * input->strides[1] +
+                        ih * input->strides[2] + iw * input->strides[3];
+                    imat[ic * spatial + (ni * h + ih) * w + iw] =
+                        input->data[in_off];
+                }
+            }
+        }
+    }
+
+    NC_Tensor kt = { 0 }, it = { 0 }, rt = { 0 };
+    kt.data = kmat;
+    kt.ndim = 2; kt.shape[0] = kout; kt.shape[1] = c_in;
+    kt.strides[0] = 1; kt.strides[1] = kout; /* transposta de [c_in, kout] */
+    kt.size = kmat_elems;
+    it.data = imat;
+    it.ndim = 2; it.shape[0] = c_in; it.shape[1] = spatial;
+    it.strides[0] = spatial; it.strides[1] = 1;
+    it.size = in_elems;
+    rt.data = result;
+    rt.ndim = 2; rt.shape[0] = kout; rt.shape[1] = spatial;
+    rt.strides[0] = spatial; rt.strides[1] = 1;
+    rt.size = result_elems;
+
+    nc_matmul(&kt, &it, &rt);
+
+    nc_tensor_fill_zeros(output);
+    for (size_t ni = 0; ni < n; ++ni) {
+        for (size_t oc = 0; oc < c_out; ++oc) {
+            for (size_t kh = 0; kh < k_h; ++kh) {
+                for (size_t kw = 0; kw < k_w; ++kw) {
+                    const size_t row = (oc * k_h + kh) * k_w + kw;
+                    for (size_t ih = 0; ih < h; ++ih) {
+                        const size_t oh = ih * stride + kh;
+                        if (oh < padding || oh >= out_h + padding) {
+                            continue;
+                        }
+                        for (size_t iw = 0; iw < w; ++iw) {
+                            const size_t ow = iw * stride + kw;
+                            if (ow < padding || ow >= out_w + padding) {
+                                continue;
+                            }
+                            const size_t out_off =
+                                ni * output->strides[0] + oc * output->strides[1] +
+                                (oh - padding) * output->strides[2] +
+                                (ow - padding) * output->strides[3];
+                            output->data[out_off] +=
+                                result[row * spatial + (ni * h + ih) * w + iw];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

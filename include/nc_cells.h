@@ -60,6 +60,17 @@ typedef struct {
     NC_Tensor *write_head;
 } NC_CellNTMState;
 
+/* Parâmetros de células convolucionais / pooling (Marco 3). */
+typedef struct {
+    size_t stride;
+    size_t padding;
+    size_t pool_kernel;
+    size_t pool_stride;
+    bool transpose;
+    bool is_pool;
+    bool avg_pool;
+} NC_CellConvState;
+
 typedef struct NC_Cell {
     size_t id;
     NC_CellType type;
@@ -73,6 +84,7 @@ typedef struct NC_Cell {
         NC_CellSpikingState spiking;
         NC_CellLSTMState lstm;
         NC_CellNTMState ntm;
+        NC_CellConvState conv;
         struct {
             float noise_std;
             float dropout_rate;
@@ -86,6 +98,11 @@ NC_Cell *nc_cell_create(NC_Arena *arena, size_t id, NC_CellType type,
 /* Cria weights [in_dim, out_dim] e (opcionalmente) bias [1, out_dim]. */
 bool nc_cell_init_params(NC_Cell *cell, NC_Arena *arena,
                          size_t in_dim, size_t out_dim, bool with_bias);
+
+/* Cria weights convolucionais [c_out, c_in, k_h, k_w] e bias opcional. */
+bool nc_cell_init_conv_params(NC_Cell *cell, NC_Arena *arena,
+                              size_t c_out, size_t c_in,
+                              size_t k_h, size_t k_w, bool with_bias);
 
 /* Executa a célula; retorna NULL para tipos ainda não implementados. */
 NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,

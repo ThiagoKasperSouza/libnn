@@ -67,6 +67,10 @@ NC_Tensor *nc_graph_forward(NC_Graph *graph, const NC_Tensor *input,
 /* Aplica a penalidade de sparsity (se houver) e roda a fita em ordem reversa. */
 void nc_graph_backward(NC_Graph *graph);
 
+/* Variante sem zerar gradientes: usada quando o gradiente de saída já foi
+ * semeado por outro grafo (treino adversarial do gerador). */
+void nc_graph_backward_no_zero(NC_Graph *graph);
+
 /* Cria os estados Adam para os parâmetros treináveis (idempotente). */
 void nc_graph_ensure_adam_states(NC_Graph *graph);
 

@@ -105,4 +105,43 @@ void nc_conv2d_transpose(const NC_Tensor *input, const NC_Tensor *kernel,
 void nc_max_pool2d(const NC_Tensor *input, NC_Tensor *output,
                    size_t kernel_size, size_t stride);
 
+/* ------------------- Operações espaciais do Marco 3 ------------------- */
+
+/*
+ * Achata um tensor contíguo em uma view 2D [N, C*H*W]. A view é alocada em
+ * `scratch`. Com `requires_grad=true`, exige que o tensor original já tenha
+ * `grad` alocado (caso contrário retorna NULL) e compartilha esse buffer,
+ * para que o gradiente de camadas densas chegue às ativações convolucionais.
+ * Com `false`, a view não possui gradiente.
+ */
+NC_Tensor *nc_tensor_flatten(NC_Arena *scratch, const NC_Tensor *t,
+                             bool requires_grad);
+
+/* Calcula o shape de saída de convolução/transposta/pooling (false se inválido). */
+bool nc_conv2d_output_shape(const NC_Tensor *input, const NC_Tensor *kernel,
+                            size_t stride, size_t padding, size_t out_shape[4]);
+bool nc_conv2d_transpose_output_shape(const NC_Tensor *input,
+                                      const NC_Tensor *kernel, size_t stride,
+                                      size_t padding, size_t out_shape[4]);
+bool nc_pool_output_shape(const NC_Tensor *input, size_t kernel_size,
+                          size_t stride, size_t out_shape[4]);
+
+/* Average pooling 2D sem padding. */
+void nc_avg_pool2d(const NC_Tensor *input, NC_Tensor *output,
+                   size_t kernel_size, size_t stride);
+
+/*
+ * Convolução 2D via im2col + GEMM. O buffer im2col vive em `scratch` e é
+ * reaproveitado pelo chamador entre iterações via nc_arena_reset().
+ * Mesma convenção de shapes de nc_conv2d().
+ */
+void nc_conv2d_im2col(NC_Arena *scratch, const NC_Tensor *input,
+                      const NC_Tensor *kernel, NC_Tensor *output,
+                      size_t stride, size_t padding);
+
+/* Convolução transposta via GEMM + col2im. Mesma convenção de shapes. */
+void nc_conv2d_transpose_im2col(NC_Arena *scratch, const NC_Tensor *input,
+                                const NC_Tensor *kernel, NC_Tensor *output,
+                                size_t stride, size_t padding);
+
 #endif /* NC_TENSOR_H */

@@ -2,7 +2,7 @@
 
 SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdlib`, `math`, `string`, `stdint`, `stddef`, `stdbool`). A arquitetura completa e o roadmap estão em [`Plano de Arquitetura_ SDK de Redes Neurais em C Puro (Zero Dependências).md`](./Plano%20de%20Arquitetura_%20SDK%20de%20Redes%20Neurais%20em%20C%20Puro%20%28Zero%20Depend%C3%AAncias%29.md).
 
-**Status:** Marcos 1 e 2 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md) e [`docs/MARCO2.md`](./docs/MARCO2.md).
+**Status:** Marcos 1 a 3 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md), [`docs/MARCO2.md`](./docs/MARCO2.md) e [`docs/MARCO3.md`](./docs/MARCO3.md).
 
 ## Marcos
 
@@ -10,7 +10,7 @@ SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdli
 | :-- | :-- | :-- |
 | 1 | Arena, tensores, matmul com tiling, RNG, testes de memória | ✅ implementado |
 | 2 | Tape de autograd, Adam, P/FF/DFF/AE/DAE/SAE/DRN | ✅ implementado |
-| 3 | `im2col` + GEMM, conv transposta, pooling, DCN/DN/DCIGN/GAN | ⏳ |
+| 3 | `im2col` + GEMM, conv transposta, pooling, DCN/DN/DCIGN/GAN | ✅ implementado |
 | 4 | Unrolling temporal, BPTT, LSTM/GRU/NTM | ⏳ |
 | 5 | Energia, spiking e reservatórios | ⏳ |
 | 6 | Renderizador SVG e certificação | ⏳ |
@@ -41,21 +41,25 @@ libnn/
 │   ├── nc_cells.h     # 13 tipos de célula e ativações
 │   ├── nc_topology.h  # NC_Graph, arestas e forward/backward
 │   ├── nc_trainers.h  # Adam e MSE
-│   └── nc_zoo.h       # construtores P/FF/DFF/AE/DAE/SAE/DRN
+│   └── nc_zoo.h       # construtores P/FF/DFF/AE/DAE/SAE/DRN + DCN/DN/DCIGN/GAN
 ├── src/                # um .c por header acima (exceto neurochart.h)
 ├── examples/
 │   ├── marco1_basics.c
 │   ├── xor_perceptron.c
-│   └── dae_example.c
+│   ├── dae_example.c
+│   ├── dcn_synthetic.c
+│   └── gan_toy.c
 ├── tests/
 │   ├── test_common.h
 │   ├── test_arena.c
 │   ├── test_tensor.c
 │   ├── test_autograd.c
-│   └── test_zoo.c
+│   ├── test_zoo.c
+│   └── test_spatial.c
 ├── docs/
 │   ├── MARCO1.md
-│   └── MARCO2.md
+│   ├── MARCO2.md
+│   └── MARCO3.md
 ├── Makefile
 └── README.md
 ```
@@ -97,8 +101,10 @@ nc_arena_free(&model);
 ```
 
 Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
-[`examples/xor_perceptron.c`](./examples/xor_perceptron.c) e
-[`examples/dae_example.c`](./examples/dae_example.c).
+[`examples/xor_perceptron.c`](./examples/xor_perceptron.c),
+[`examples/dae_example.c`](./examples/dae_example.c),
+[`examples/dcn_synthetic.c`](./examples/dcn_synthetic.c) e
+[`examples/gan_toy.c`](./examples/gan_toy.c).
 
 ## API do Marco 1
 
@@ -121,7 +127,9 @@ Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
 | `nc_tensor_fill_zeros / random_normal / random_uniform` | Preenchimento de `data` (e `grad`, nos zeros) |
 | `nc_rng_seed / next_u64 / next_double / next_normal` | Xoshiro256\*\* + splitmix64 + Box-Muller, global e determinístico |
 | `nc_matmul(A, B, C)` | GEMM com tiling; lida com aliasing entre `C` e as entradas |
-| `nc_conv2d / conv2d_transpose / max_pool2d` | Operações 2D sobre tensores `[N,C,H,W]` |
+| `nc_conv2d / conv2d_transpose / max_pool2d` | Operações 2D diretas sobre tensores `[N,C,H,W]` |
+| `nc_conv2d_im2col / conv2d_transpose_im2col` | Mesmas operações via im2col + GEMM (buffer na scratch) |
+| `nc_avg_pool2d / nc_tensor_flatten` | Pooling médio e achatamento `[N,C,H,W] → [N,C*H*W]` |
 
 ## API do Marco 2
 
@@ -145,14 +153,25 @@ Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
 | `nc_train_backprop_step(g, opt)` | Adam com correção de viés; estados criados na primeira chamada |
 | `nc_zoo_create_{perceptron,ff,dff,ae,dae,sae,drn}` | Fábricas das 7 topologias do Marco 2 |
 
+## API do Marco 3
+
+| Função | Contrato |
+| :-- | :-- |
+| `nc_nn_conv2d / conv2d_transpose / max_pool2d / avg_pool2d` | Forward espacial com gravação na fita |
+| `nc_cell_init_conv_params` | Inicializa kernel 4D `[c_out,c_in,kH,kW]` com Xavier |
+| `nc_graph_backward_no_zero` | Backward sem zerar gradientes (usado pelo gerador da GAN) |
+| `nc_zoo_create_{dcn,dn,dcign}` | DCN, DN e autoencoder convolucional |
+| `nc_zoo_create_gan / nc_train_gan_step` | Par gerador/discriminador e passo minimax |
+
 ## Validação
 
-`make test` cobre os quatro binários: arena/tensores (Marco 1), gradientes analíticos vs. diferenças finitas, MSE/dropout/ativações, estrutura das 7 topologias, treino de XOR até erro ~0 e reconstrução AE/DAE/SAE/DRN com perda decrescente. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
+`make test` cobre cinco binários: arena/tensores (Marco 1), gradientes analíticos, estrutura das 7 topologias feedforward, treino de XOR e reconstrução AE/DAE/SAE/DRN (Marco 2) e, no Marco 3, im2col vs. convolução direta, gradientes espaciais por diferenças finitas, DCN/DN/DCIGN com perda decrescente e 200 passos de GAN. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
 
 ## Limitações conhecidas
 
-- `nc_conv2d` usa loops diretos; `im2col + GEMM` está previsto para o Marco 3.
+- Backward de convolução usa laços diretos; o forward é que usa im2col + GEMM.
+- O latente do DCIGN é determinístico (`mu = x`); amostragem/KL chegam no Marco 5.
+- A GAN usa MSE como objective adversarial, não BCE.
 - O RNG é estado global, não thread-safe.
 - Alias entre `C` e as entradas de `nc_matmul` usa `malloc` temporário (caminho excepcional, fora do hot path).
-- O Marco 2 implementa apenas as células `INPUT`, `NOISY_INPUT`, `HIDDEN`, `OUTPUT` e `MATCH_INPUT_OUTPUT`; as demais (probabilística, spiking, recorrentes, kernel) chegam nos marcos 3–5.
-- `nc_render` (SVG) ainda não existe — está previsto para o Marco 6.
+- Células spiking e recorrentes chegam nos Marcos 4–5; `nc_render` (SVG) no Marco 6.

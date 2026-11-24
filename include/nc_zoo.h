@@ -21,4 +21,25 @@ NC_Graph *nc_zoo_create_drn(NC_Arena *model, size_t input_dim,
                             const size_t hidden_dims[], size_t hidden_count,
                             size_t output_dim);
 
+/* ------------------------- Topologias do Marco 3 ----------------------- */
+
+/* Rede convolucional profunda: INPUT -> CONV -> POOL -> OUTPUT densa. */
+NC_Graph *nc_zoo_create_dcn(NC_Arena *model, size_t channels, size_t h,
+                            size_t w, size_t num_classes);
+
+/* Rede deconvolucional: INPUT -> CONV_TRANSPOSE -> MATCH (upsample). */
+NC_Graph *nc_zoo_create_dn(NC_Arena *model, size_t channels, size_t h, size_t w);
+
+/* Autoencoder convolucional: INPUT -> CONV -> latente -> CONV_T -> MATCH. */
+NC_Graph *nc_zoo_create_dcign(NC_Arena *model, size_t channels, size_t h,
+                              size_t w, size_t latent_channels);
+
+/* GAN: par gerador/discriminador acoplado para treino adversarial. */
+typedef struct {
+    NC_Graph *generator;
+    NC_Graph *discriminator;
+} NC_GAN;
+
+NC_GAN *nc_zoo_create_gan(NC_Arena *model, size_t latent_dim, size_t data_dim);
+
 #endif /* NC_ZOO_H */

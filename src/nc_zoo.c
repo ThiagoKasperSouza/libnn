@@ -1,5 +1,7 @@
 #include "nc_zoo.h"
 
+#include <stdalign.h>
+
 /* Capacidade generosa o suficiente para as topologias feedforward do Marco 2. */
 #define ZOO_TAPE_CAPACITY 128
 
@@ -169,4 +171,116 @@ NC_Graph *nc_zoo_create_drn(NC_Arena *model, size_t input_dim,
         return NULL;
     }
     return g;
+}
+
+/* ------------------------- Topologias do Marco 3 ----------------------- */
+
+NC_Graph *nc_zoo_create_dcn(NC_Arena *model, size_t channels, size_t h,
+                            size_t w, size_t num_classes)
+{
+    if (h < 2 || w < 2) {
+        return NULL;
+    }
+    const size_t filters = 8;
+    NC_Graph *g = new_graph(model, 4, 3);
+    if (g == NULL) {
+        return NULL;
+    }
+
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *conv = nc_graph_add_cell(g, NC_CELL_KERNEL, NC_ACT_RELU);
+    NC_Cell *pool = nc_graph_add_cell(g, NC_CELL_CONV_OR_POOL, NC_ACT_LINEAR);
+    NC_Cell *out = add_layer(g, NC_CELL_OUTPUT, NC_ACT_LINEAR,
+                             filters * (h / 2) * (w / 2), num_classes);
+    if (input == NULL || conv == NULL || pool == NULL || out == NULL ||
+        !nc_cell_init_conv_params(conv, model, filters, channels, 3, 3, true)) {
+        return NULL;
+    }
+    conv->state.conv.stride = 1;
+    conv->state.conv.padding = 1;
+    pool->state.conv.is_pool = true;
+    pool->state.conv.pool_kernel = 2;
+    pool->state.conv.pool_stride = 2;
+
+    return nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 2, 3, NC_EDGE_FORWARD) ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_dn(NC_Arena *model, size_t channels, size_t h, size_t w)
+{
+    if (channels == 0 || h == 0 || w == 0) {
+        return NULL;
+    }
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) {
+        return NULL;
+    }
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *deconv = nc_graph_add_cell(g, NC_CELL_CONV_OR_POOL, NC_ACT_RELU);
+    NC_Cell *match = nc_graph_add_cell(g, NC_CELL_MATCH_INPUT_OUTPUT, NC_ACT_LINEAR);
+    if (input == NULL || deconv == NULL || match == NULL ||
+        !nc_cell_init_conv_params(deconv, model, channels, channels, 2, 2, true)) {
+        return NULL;
+    }
+    deconv->state.conv.transpose = true;
+    deconv->state.conv.stride = 2;
+    deconv->state.conv.padding = 0;
+
+    return nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD) ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_dcign(NC_Arena *model, size_t channels, size_t h,
+                              size_t w, size_t latent_channels)
+{
+    if (channels == 0 || h == 0 || w == 0 || latent_channels == 0) {
+        return NULL;
+    }
+    NC_Graph *g = new_graph(model, 5, 4);
+    if (g == NULL) {
+        return NULL;
+    }
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *enc = nc_graph_add_cell(g, NC_CELL_KERNEL, NC_ACT_RELU);
+    NC_Cell *latent = nc_graph_add_cell(g, NC_CELL_PROBABILISTIC_HIDDEN, NC_ACT_LINEAR);
+    NC_Cell *dec = nc_graph_add_cell(g, NC_CELL_CONV_OR_POOL, NC_ACT_RELU);
+    NC_Cell *match = nc_graph_add_cell(g, NC_CELL_MATCH_INPUT_OUTPUT, NC_ACT_LINEAR);
+    if (input == NULL || enc == NULL || latent == NULL || dec == NULL ||
+        match == NULL ||
+        !nc_cell_init_conv_params(enc, model, latent_channels, channels, 3, 3, true) ||
+        /* A transposta lê o kernel como [C_in, C_out, kH, kW]. */
+        !nc_cell_init_conv_params(dec, model, latent_channels, channels, 3, 3, true)) {
+        return NULL;
+    }
+    enc->state.conv.stride = 1;
+    enc->state.conv.padding = 1;
+    dec->state.conv.transpose = true;
+    dec->state.conv.stride = 1;
+    dec->state.conv.padding = 1;
+
+    return nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 2, 3, NC_EDGE_FORWARD) &&
+           nc_graph_connect(g, 3, 4, NC_EDGE_FORWARD) ? g : NULL;
+}
+
+NC_GAN *nc_zoo_create_gan(NC_Arena *model, size_t latent_dim, size_t data_dim)
+{
+    if (model == NULL || latent_dim == 0 || data_dim == 0) {
+        return NULL;
+    }
+    NC_GAN *gan = (NC_GAN *)nc_arena_alloc(model, sizeof(*gan), alignof(NC_GAN));
+    if (gan == NULL) {
+        return NULL;
+    }
+    const size_t hidden[2] = { 32, 32 };
+    gan->generator = nc_zoo_create_dff(model, latent_dim, hidden, 2, data_dim);
+    gan->discriminator = nc_zoo_create_dff(model, data_dim, hidden, 2, 1);
+    if (gan->generator == NULL || gan->discriminator == NULL) {
+        gan->generator = NULL;
+        gan->discriminator = NULL;
+        return NULL;
+    }
+    return gan;
 }

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdalign.h>
 #include <stdlib.h>
+#include <string.h>
 
 static const double NC_SQRT_2PI = 2.506628274631000502415765284811;
 
@@ -67,7 +68,11 @@ static NC_OpParams *new_params(NC_Arena *scratch, NC_OpType op)
         p->op = op;
         p->target = NULL;
         p->mask = NULL;
+        p->pool_indices = NULL;
         p->scale = 1.0f;
+        p->stride = 0;
+        p->padding = 0;
+        p->kernel_size = 0;
     }
     return p;
 }
@@ -79,11 +84,19 @@ static void accumulate(NC_Tensor *t, size_t index, float value)
     }
 }
 
-/* Índice físico do i-ésimo elemento de um tensor 2D contíguo/em view. */
+/* Índice físico do i-ésimo elemento, para qualquer ndim (1–4). */
 static size_t flat_index(const NC_Tensor *t, size_t i)
 {
-    const size_t cols = t->shape[1];
-    return (i / cols) * t->strides[0] + (i % cols) * t->strides[1];
+    size_t offset = 0;
+    for (size_t d = t->ndim; d-- > 0;) {
+        const size_t dim = t->shape[d];
+        if (dim == 0) {
+            return 0;
+        }
+        offset += (i % dim) * t->strides[d];
+        i /= dim;
+    }
+    return offset;
 }
 
 /* ------------------------------ Backward ------------------------------- */
@@ -202,6 +215,18 @@ static void elementwise_backward(struct NC_TapeNode *node)
     }
 }
 
+static void identity_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *x = node->inputs[0];
+    const NC_Tensor *y = node->output;
+    if (x == NULL || y == NULL || y->grad == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < x->size; ++i) {
+        accumulate(x, flat_index(x, i), y->grad[flat_index(y, i)]);
+    }
+}
+
 static void dropout_backward(struct NC_TapeNode *node)
 {
     NC_Tensor *x = node->inputs[0];
@@ -233,6 +258,235 @@ static void mse_backward(struct NC_TapeNode *node)
         const size_t pi = flat_index(pred, i);
         accumulate(pred, pi,
                    scale * (pred->data[pi] - target->data[flat_index(target, i)]));
+    }
+}
+
+/* --------------------- Backward espacial (Marco 3) --------------------- */
+
+static void conv2d_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *input = node->inputs[0];
+    NC_Tensor *kernel = node->inputs[1];
+    const NC_Tensor *dy = node->output;
+    const NC_OpParams *p = (const NC_OpParams *)node->custom_params;
+    if (input == NULL || kernel == NULL || dy == NULL || dy->grad == NULL ||
+        p == NULL) {
+        return;
+    }
+    const size_t stride = p->stride, pad = p->padding;
+    const size_t c_out = kernel->shape[0];
+    const size_t k_h = kernel->shape[2], k_w = kernel->shape[3];
+    const size_t o_h = dy->shape[2], o_w = dy->shape[3];
+
+    /* dKernel = corr(im2col(input), dy) */
+    for (size_t oc = 0; oc < c_out; ++oc) {
+        for (size_t ic = 0; ic < input->shape[1]; ++ic) {
+            for (size_t kh = 0; kh < k_h; ++kh) {
+                for (size_t kw = 0; kw < k_w; ++kw) {
+                    float sum = 0.0f;
+                    for (size_t n = 0; n < input->shape[0]; ++n) {
+                        for (size_t oh = 0; oh < o_h; ++oh) {
+                            const size_t ih = oh * stride + kh;
+                            if (ih < pad || ih >= input->shape[2] + pad) {
+                                continue;
+                            }
+                            for (size_t ow = 0; ow < o_w; ++ow) {
+                                const size_t iw = ow * stride + kw;
+                                if (iw < pad || iw >= input->shape[3] + pad) {
+                                    continue;
+                                }
+                                const size_t d_off =
+                                    n * dy->strides[0] + oc * dy->strides[1] +
+                                    oh * dy->strides[2] + ow * dy->strides[3];
+                                const size_t in_off =
+                                    n * input->strides[0] + ic * input->strides[1] +
+                                    (ih - pad) * input->strides[2] +
+                                    (iw - pad) * input->strides[3];
+                                sum += dy->grad[d_off] * input->data[in_off];
+                            }
+                        }
+                    }
+                    const size_t k_off =
+                        oc * kernel->strides[0] + ic * kernel->strides[1] +
+                        kh * kernel->strides[2] + kw * kernel->strides[3];
+                    accumulate(kernel, k_off, sum);
+                }
+            }
+        }
+    }
+
+    /* dInput = conv_transpose(dy, kernel), com um laço explícito por canal
+     * de entrada: cada canal usa os filtros correspondentes do kernel. */
+    for (size_t n = 0; n < input->shape[0]; ++n) {
+        for (size_t ic = 0; ic < input->shape[1]; ++ic) {
+            for (size_t oh = 0; oh < o_h; ++oh) {
+                for (size_t ow = 0; ow < o_w; ++ow) {
+                    for (size_t oc = 0; oc < c_out; ++oc) {
+                        const size_t d_off =
+                            n * dy->strides[0] + oc * dy->strides[1] +
+                            oh * dy->strides[2] + ow * dy->strides[3];
+                        const float g = dy->grad[d_off];
+                        for (size_t kh = 0; kh < k_h; ++kh) {
+                            const size_t ih = oh * stride + kh;
+                            if (ih < pad || ih >= input->shape[2] + pad) {
+                                continue;
+                            }
+                            for (size_t kw = 0; kw < k_w; ++kw) {
+                                const size_t iw = ow * stride + kw;
+                                if (iw < pad || iw >= input->shape[3] + pad) {
+                                    continue;
+                                }
+                                const size_t k_off =
+                                    oc * kernel->strides[0] +
+                                    ic * kernel->strides[1] +
+                                    kh * kernel->strides[2] +
+                                    kw * kernel->strides[3];
+                                const size_t in_off =
+                                    n * input->strides[0] + ic * input->strides[1] +
+                                    (ih - pad) * input->strides[2] +
+                                    (iw - pad) * input->strides[3];
+                                accumulate(input, in_off, g * kernel->data[k_off]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void conv_transpose_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *input = node->inputs[0];
+    NC_Tensor *kernel = node->inputs[1];
+    const NC_Tensor *dy = node->output;
+    const NC_OpParams *p = (const NC_OpParams *)node->custom_params;
+    if (input == NULL || kernel == NULL || dy == NULL || dy->grad == NULL ||
+        p == NULL) {
+        return;
+    }
+    const size_t stride = p->stride, pad = p->padding;
+    const size_t c_out = kernel->shape[1];
+    const size_t k_h = kernel->shape[2], k_w = kernel->shape[3];
+    const size_t out_h = dy->shape[2], out_w = dy->shape[3];
+
+    /* dInput = conv(dy, kernel, stride, padding) */
+    for (size_t n = 0; n < input->shape[0]; ++n) {
+        for (size_t ic = 0; ic < input->shape[1]; ++ic) {
+            for (size_t ih = 0; ih < input->shape[2]; ++ih) {
+                for (size_t iw = 0; iw < input->shape[3]; ++iw) {
+                    for (size_t kh = 0; kh < k_h; ++kh) {
+                        const size_t oh = ih * stride + kh;
+                        if (oh < pad || oh >= out_h + pad) {
+                            continue;
+                        }
+                        for (size_t kw = 0; kw < k_w; ++kw) {
+                            const size_t ow = iw * stride + kw;
+                            if (ow < pad || ow >= out_w + pad) {
+                                continue;
+                            }
+                            for (size_t oc = 0; oc < c_out; ++oc) {
+                                const size_t d_off =
+                                    n * dy->strides[0] + oc * dy->strides[1] +
+                                    (oh - pad) * dy->strides[2] +
+                                    (ow - pad) * dy->strides[3];
+                                const size_t in_off =
+                                    n * input->strides[0] + ic * input->strides[1] +
+                                    ih * input->strides[2] + iw * input->strides[3];
+                                const size_t k_off =
+                                    ic * kernel->strides[0] + oc * kernel->strides[1] +
+                                    kh * kernel->strides[2] + kw * kernel->strides[3];
+                                accumulate(input, in_off,
+                                           dy->grad[d_off] * kernel->data[k_off]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* dKernel = correlação entre input e dy. */
+    for (size_t ic = 0; ic < input->shape[1]; ++ic) {
+        for (size_t oc = 0; oc < c_out; ++oc) {
+            for (size_t kh = 0; kh < k_h; ++kh) {
+                for (size_t kw = 0; kw < k_w; ++kw) {
+                    float sum = 0.0f;
+                    for (size_t n = 0; n < input->shape[0]; ++n) {
+                        for (size_t ih = 0; ih < input->shape[2]; ++ih) {
+                            const size_t oh = ih * stride + kh;
+                            if (oh < pad || oh >= out_h + pad) {
+                                continue;
+                            }
+                            for (size_t iw = 0; iw < input->shape[3]; ++iw) {
+                                const size_t ow = iw * stride + kw;
+                                if (ow < pad || ow >= out_w + pad) {
+                                    continue;
+                                }
+                                const size_t d_off =
+                                    n * dy->strides[0] + oc * dy->strides[1] +
+                                    (oh - pad) * dy->strides[2] +
+                                    (ow - pad) * dy->strides[3];
+                                const size_t in_off =
+                                    n * input->strides[0] + ic * input->strides[1] +
+                                    ih * input->strides[2] + iw * input->strides[3];
+                                sum += dy->grad[d_off] * input->data[in_off];
+                            }
+                        }
+                    }
+                    const size_t k_off =
+                        ic * kernel->strides[0] + oc * kernel->strides[1] +
+                        kh * kernel->strides[2] + kw * kernel->strides[3];
+                    accumulate(kernel, k_off, sum);
+                }
+            }
+        }
+    }
+}
+
+static void maxpool_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *input = node->inputs[0];
+    const NC_Tensor *dy = node->output;
+    const NC_OpParams *p = (const NC_OpParams *)node->custom_params;
+    if (input == NULL || dy == NULL || dy->grad == NULL || p == NULL ||
+        p->pool_indices == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < dy->size; ++i) {
+        accumulate(input, p->pool_indices[i], dy->grad[i]);
+    }
+}
+
+static void avgpool_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *input = node->inputs[0];
+    const NC_Tensor *dy = node->output;
+    const NC_OpParams *p = (const NC_OpParams *)node->custom_params;
+    if (input == NULL || dy == NULL || dy->grad == NULL || p == NULL ||
+        p->kernel_size == 0) {
+        return;
+    }
+    const size_t k = p->kernel_size;
+    const float scale = 1.0f / (float)(k * k);
+    size_t index = 0;
+    for (size_t n = 0; n < dy->shape[0]; ++n) {
+        for (size_t c = 0; c < dy->shape[1]; ++c) {
+            for (size_t oh = 0; oh < dy->shape[2]; ++oh) {
+                for (size_t ow = 0; ow < dy->shape[3]; ++ow, ++index) {
+                    const float g = dy->grad[index] * scale;
+                    for (size_t kh = 0; kh < k; ++kh) {
+                        for (size_t kw = 0; kw < k; ++kw) {
+                            const size_t in_off =
+                                n * input->strides[0] + c * input->strides[1] +
+                                (oh * p->stride + kh) * input->strides[2] +
+                                (ow * p->stride + kw) * input->strides[3];
+                            accumulate(input, in_off, g);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -386,4 +640,146 @@ void nc_autograd_record_mse(NC_Tape *tape, const NC_Tensor *pred,
      */
     nc_autograd_record(tape, (NC_Tensor *)pred, (NC_Tensor *)target,
                        (NC_Tensor *)pred, mse_backward, NULL);
+}
+
+/* --------------------- Forward espacial (Marco 3) ---------------------- */
+
+NC_Tensor *nc_nn_identity(NC_Tape *tape, NC_Arena *scratch,
+                          const NC_Tensor *x)
+{
+    if (tape == NULL || scratch == NULL || x == NULL || x->ndim == 0 ||
+        x->ndim > 4) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, x->shape, x->ndim, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out->data, x->data, x->size * sizeof(float));
+    nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, identity_backward, NULL);
+    return out;
+}
+
+NC_Tensor *nc_nn_conv2d(NC_Tape *tape, NC_Arena *scratch,
+                        const NC_Tensor *input, const NC_Tensor *kernel,
+                        size_t stride, size_t padding)
+{
+    size_t shape[4];
+    if (tape == NULL || scratch == NULL ||
+        !nc_conv2d_output_shape(input, kernel, stride, padding, shape)) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, shape, 4, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    nc_conv2d_im2col(scratch, input, kernel, out, stride, padding);
+
+    NC_OpParams *p = new_params(scratch, NC_OP_CONV2D);
+    p->stride = stride;
+    p->padding = padding;
+    nc_autograd_record(tape, (NC_Tensor *)input, (NC_Tensor *)kernel, out,
+                       conv2d_backward, p);
+    return out;
+}
+
+NC_Tensor *nc_nn_conv2d_transpose(NC_Tape *tape, NC_Arena *scratch,
+                                  const NC_Tensor *input, const NC_Tensor *kernel,
+                                  size_t stride, size_t padding)
+{
+    size_t shape[4];
+    if (tape == NULL || scratch == NULL ||
+        !nc_conv2d_transpose_output_shape(input, kernel, stride, padding, shape)) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, shape, 4, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    nc_conv2d_transpose_im2col(scratch, input, kernel, out, stride, padding);
+
+    NC_OpParams *p = new_params(scratch, NC_OP_CONV_TRANSPOSE);
+    p->stride = stride;
+    p->padding = padding;
+    nc_autograd_record(tape, (NC_Tensor *)input, (NC_Tensor *)kernel, out,
+                       conv_transpose_backward, p);
+    return out;
+}
+
+NC_Tensor *nc_nn_max_pool2d(NC_Tape *tape, NC_Arena *scratch,
+                            const NC_Tensor *input, size_t kernel_size,
+                            size_t stride)
+{
+    size_t shape[4];
+    if (tape == NULL || scratch == NULL ||
+        !nc_pool_output_shape(input, kernel_size, stride, shape)) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, shape, 4, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    size_t *indices = (size_t *)nc_arena_alloc(scratch,
+                                               out->size * sizeof(size_t),
+                                               alignof(size_t));
+    if (indices == NULL) {
+        return NULL;
+    }
+
+    size_t index = 0;
+    for (size_t n = 0; n < out->shape[0]; ++n) {
+        for (size_t c = 0; c < out->shape[1]; ++c) {
+            for (size_t oh = 0; oh < out->shape[2]; ++oh) {
+                for (size_t ow = 0; ow < out->shape[3]; ++ow, ++index) {
+                    float best = -INFINITY;
+                    size_t best_off = 0;
+                    for (size_t kh = 0; kh < kernel_size; ++kh) {
+                        for (size_t kw = 0; kw < kernel_size; ++kw) {
+                            const size_t in_off =
+                                n * input->strides[0] + c * input->strides[1] +
+                                (oh * stride + kh) * input->strides[2] +
+                                (ow * stride + kw) * input->strides[3];
+                            if (input->data[in_off] > best) {
+                                best = input->data[in_off];
+                                best_off = in_off;
+                            }
+                        }
+                    }
+                    out->data[index] = best;
+                    indices[index] = best_off;
+                }
+            }
+        }
+    }
+
+    NC_OpParams *p = new_params(scratch, NC_OP_MAXPOOL);
+    p->pool_indices = indices;
+    p->kernel_size = kernel_size;
+    p->stride = stride;
+    nc_autograd_record(tape, (NC_Tensor *)input, NULL, out,
+                       maxpool_backward, p);
+    return out;
+}
+
+NC_Tensor *nc_nn_avg_pool2d(NC_Tape *tape, NC_Arena *scratch,
+                            const NC_Tensor *input, size_t kernel_size,
+                            size_t stride)
+{
+    size_t shape[4];
+    if (tape == NULL || scratch == NULL ||
+        !nc_pool_output_shape(input, kernel_size, stride, shape)) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, shape, 4, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    nc_avg_pool2d(input, out, kernel_size, stride);
+
+    NC_OpParams *p = new_params(scratch, NC_OP_AVGPOOL);
+    p->kernel_size = kernel_size;
+    p->stride = stride;
+    nc_autograd_record(tape, (NC_Tensor *)input, NULL, out,
+                       avgpool_backward, p);
+    return out;
 }
