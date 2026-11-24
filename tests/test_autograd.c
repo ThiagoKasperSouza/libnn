@@ -176,11 +176,84 @@ static void test_activations_dropout_and_mse(void)
     nc_arena_free(&model);
 }
 
+static void test_review_regressions(void)
+{
+    NC_Arena model = nc_arena_init(512 * 1024);
+    NC_Arena scratch = nc_arena_init(512 * 1024);
+    NC_Tape *tape = nc_autograd_tape_init(&model, 16);
+    NC_CHECK(tape != NULL);
+
+    /* 1: shapes de matmul incompatíveis devem ser rejeitados sem gravar nó. */
+    const float av[] = { 1, 2, 3, 4, 5, 6 };
+    const float bv[] = { 1, 2, 3, 4 };
+    NC_Tensor *a = matrix(&model, 2, 3, false, av);
+    NC_Tensor *b = matrix(&model, 2, 2, false, bv);
+    NC_CHECK(nc_nn_matmul(tape, &scratch, a, b) == NULL);
+    NC_CHECK(tape->count == 0);
+
+    /* 2: add só permite linhas iguais ou broadcasting de um dos lados. */
+    const float a2v[] = { 1, 1, 1, 1 };
+    const float b2v[] = { 2, 2, 2, 2, 2, 2 };
+    NC_Tensor *a2 = matrix(&model, 2, 2, false, a2v);
+    NC_Tensor *b2 = matrix(&model, 3, 2, false, b2v);
+    NC_CHECK(nc_nn_add(tape, &scratch, a2, b2) == NULL);
+    NC_CHECK(tape->count == 0);
+
+    const float bias_values[] = { 2, 3 };
+    NC_Tensor *bias = matrix(&model, 1, 2, true, bias_values);
+    NC_Tensor *sum = nc_nn_add(tape, &scratch, a2, bias);
+    NC_CHECK(sum != NULL);
+    for (size_t i = 0; i < sum->size; ++i) sum->grad[i] = 1.0f;
+    nc_autograd_backward(tape);
+    NC_CHECK_NEAR(bias->grad[0], 2.0f, 1e-6f); /* soma sobre as 2 linhas */
+    NC_CHECK_NEAR(bias->grad[1], 2.0f, 1e-6f);
+
+    nc_autograd_tape_reset(tape);
+    NC_Tensor *single = matrix(&model, 1, 2, true, bias_values);
+    NC_Tensor *sum2 = nc_nn_add(tape, &scratch, single, b2);
+    NC_CHECK(sum2 != NULL);
+    for (size_t i = 0; i < sum2->size; ++i) sum2->grad[i] = 1.0f;
+    nc_autograd_backward(tape);
+    NC_CHECK_NEAR(single->grad[0], 3.0f, 1e-6f);
+
+    /* 3: gravar MSE não pode consumir memória da arena persistente. */
+    const float pv[] = { 1, 2, 3, 4 };
+    NC_Tensor *pred = matrix(&scratch, 1, 4, true, pv);
+    NC_Tensor *target = matrix(&model, 1, 4, false, pv);
+    const size_t before = nc_arena_bytes_used(&model);
+    for (size_t i = 0; i < 1000; ++i) {
+        nc_autograd_tape_reset(tape);
+        nc_autograd_record_mse(tape, pred, target);
+    }
+    NC_CHECK(nc_arena_bytes_used(&model) == before);
+
+    /* target menor que pred: usa min(size) e escala por |pred|. */
+    nc_autograd_tape_reset(tape);
+    const float zero2[] = { 0, 0 };
+    NC_Tensor *small_target = matrix(&model, 1, 2, false, zero2);
+    memset(pred->grad, 0, pred->size * sizeof(float));
+    nc_autograd_record_mse(tape, pred, small_target);
+    nc_autograd_backward(tape);
+    NC_CHECK_NEAR(pred->grad[0], 0.5f, 1e-6f); /* 2/|pred| * (1-0) */
+    NC_CHECK_NEAR(pred->grad[1], 1.0f, 1e-6f); /* 2/|pred| * (2-0) */
+    NC_CHECK(pred->grad[2] == 0.0f && pred->grad[3] == 0.0f);
+
+    /* 4: nenhuma operação aceita fita nula. */
+    NC_CHECK(nc_nn_matmul(NULL, &scratch, a, a) == NULL);
+    NC_CHECK(nc_nn_add(NULL, &scratch, a2, a2) == NULL);
+    NC_CHECK(nc_nn_activation(NULL, &scratch, a2, NC_OP_RELU) == NULL);
+    NC_CHECK(nc_nn_dropout(NULL, &scratch, a2, 0.5f) == NULL);
+
+    nc_arena_free(&scratch);
+    nc_arena_free(&model);
+}
+
 int main(void)
 {
     printf("=== test_autograd (Marco 2) ===\n");
     test_tape_basics();
     test_numerical_gradient();
     test_activations_dropout_and_mse();
+    test_review_regressions();
     NC_TEST_SUMMARY("test_autograd");
 }

@@ -35,6 +35,13 @@ typedef struct NC_Tensor {
 NC_Tensor *nc_tensor_create(NC_Arena *arena, const size_t shape[], size_t ndim,
                             bool requires_grad);
 
+/*
+ * Retorna true se o tensor tem strides coerentes com shape/size (layout
+ * contíguo). Operações que precisam achatar/indexar tensors usam esta
+ * verificação para rejeitar views não-contíguas em vez de calculá-las errado.
+ */
+bool nc_tensor_layout_valid(const NC_Tensor *t);
+
 /* Preenche data (e grad, se existir) com zeros. */
 void nc_tensor_fill_zeros(NC_Tensor *t);
 

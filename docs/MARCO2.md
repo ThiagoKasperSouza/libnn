@@ -35,7 +35,9 @@ A fita é alocada uma única vez na `model_arena` com capacidade fixa; `nc_graph
 - `NC_TapeNode` guarda até três entradas, a saída, uma `backward_fn` e parâmetros específicos da operação (`NC_OpParams`).
 - Cada operação diferenciável calcula o forward e registra o nó. O backward acumula (`+=`) nos gradientes das entradas, permitindo que uma mesma ativação seja usada por mais de uma operação (ex.: skip connections).
 - Gradientes de parâmetros são zerados no início de `nc_graph_backward`, não no forward.
-- `nc_nn_*` opera sobre tensores 2D `[batch, features]`. O grafo achata entradas de qualquer `ndim` para esse formato antes de executar as células.
+- `nc_nn_*` opera sobre tensores 2D `[batch, features]` e exige uma fita válida. `nc_nn_matmul` rejeita `A.cols != B.rows`; `nc_nn_add` rejeita contagens de linhas incompatíveis (só aceita iguais ou broadcasting de um dos lados).
+- O grafo achata entradas **contíguas** de qualquer `ndim` para `[batch, features]`; entradas não-contíguas são rejeitadas via `nc_tensor_layout_valid()` em vez de serem lidas incorretamente.
+- `nc_autograd_record_mse` não aloca: o alvo viaja em `inputs[1]` do nó e o fator `2/|pred|` é calculado no backward. Não há crescimento da model arena por iteração.
 - `nc_nn_dropout` usa *inverted dropout* (escala `1/keep_prob` no forward e no backward). A máscara vive na scratch arena.
 
 ### Células e grafo
@@ -79,6 +81,8 @@ make asan  → ASan + UBSan sem erros nem vazamentos nos quatro binários
 ```
 
 Destaques: gradiente analítico de `matmul → add → ReLU` comparado com diferenças finitas para todos os elementos de `W` e `b`; derivadas de ativações, dropout e MSE; estrutura das 7 arquiteturas; treino de XOR com perda final ~0; reconstrução AE/DAE/SAE/DRN com queda de perda em 1500 épocas.
+
+Regressões da revisão independente: shapes incompatíveis em `nc_nn_matmul`/`nc_nn_add` são rejeitados sem gravar nó; 1000 gravações de MSE não consomem a model arena; `tape == NULL` é rejeitado; acumulação de gradiente com a mesma entrada somada duas vezes no DRN foi conferida por diferenças finitas; entrada não-contígua é rejeitada pelo grafo.
 
 ## 6. Limitações / próximos marcos
 

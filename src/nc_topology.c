@@ -84,7 +84,7 @@ bool nc_graph_connect(NC_Graph *graph, size_t src, size_t dst, NC_EdgeType type)
 static NC_Tensor *flatten_input(NC_Arena *scratch, const NC_Tensor *input)
 {
     if (scratch == NULL || input == NULL || input->ndim == 0 ||
-        input->data == NULL) {
+        input->data == NULL || !nc_tensor_layout_valid(input)) {
         return NULL;
     }
     size_t batch = 1;

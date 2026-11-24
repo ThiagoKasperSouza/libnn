@@ -58,8 +58,9 @@ NC_Cell *nc_graph_add_cell(NC_Graph *graph, NC_CellType type,
                            NC_Activation activation);
 bool nc_graph_connect(NC_Graph *graph, size_t src, size_t dst, NC_EdgeType type);
 
-/* Achata a entrada para [batch, features], executa as células em ordem e
- * grava as operações na fita. Retorna a ativação da célula de saída. */
+/* Achata a entrada contígua para [batch, features], executa as células em
+ * ordem e grava as operações na fita. Retorna NULL se a entrada não tiver
+ * layout contíguo. */
 NC_Tensor *nc_graph_forward(NC_Graph *graph, const NC_Tensor *input,
                             NC_Arena *scratch);
 

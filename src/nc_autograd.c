@@ -223,18 +223,16 @@ static void dropout_backward(struct NC_TapeNode *node)
 static void mse_backward(struct NC_TapeNode *node)
 {
     NC_Tensor *pred = node->inputs[0];
-    const NC_OpParams *params = (const NC_OpParams *)node->custom_params;
-    if (pred == NULL || pred->grad == NULL || params == NULL ||
-        params->target == NULL) {
+    const NC_Tensor *target = node->inputs[1];
+    if (pred == NULL || pred->grad == NULL || pred->size == 0 || target == NULL) {
         return;
     }
-    const NC_Tensor *target = params->target;
     const size_t count = pred->size < target->size ? pred->size : target->size;
+    const float scale = 2.0f / (float)pred->size;
     for (size_t i = 0; i < count; ++i) {
         const size_t pi = flat_index(pred, i);
         accumulate(pred, pi,
-                   params->scale * (pred->data[pi] -
-                                    target->data[flat_index(target, i)]));
+                   scale * (pred->data[pi] - target->data[flat_index(target, i)]));
     }
 }
 
@@ -243,7 +241,8 @@ static void mse_backward(struct NC_TapeNode *node)
 NC_Tensor *nc_nn_matmul(NC_Tape *tape, NC_Arena *scratch,
                         const NC_Tensor *A, const NC_Tensor *B)
 {
-    if (A == NULL || B == NULL || scratch == NULL || A->ndim != 2 || B->ndim != 2) {
+    if (tape == NULL || A == NULL || B == NULL || scratch == NULL ||
+        A->ndim != 2 || B->ndim != 2 || A->shape[1] != B->shape[0]) {
         return NULL;
     }
     const size_t shape[2] = { A->shape[0], B->shape[1] };
@@ -262,8 +261,9 @@ NC_Tensor *nc_nn_matmul(NC_Tape *tape, NC_Arena *scratch,
 NC_Tensor *nc_nn_add(NC_Tape *tape, NC_Arena *scratch,
                      const NC_Tensor *A, const NC_Tensor *B)
 {
-    if (A == NULL || B == NULL || scratch == NULL || A->ndim != 2 || B->ndim != 2 ||
-        A->shape[1] != B->shape[1]) {
+    if (tape == NULL || A == NULL || B == NULL || scratch == NULL ||
+        A->ndim != 2 || B->ndim != 2 || A->shape[1] != B->shape[1] ||
+        (A->shape[0] != B->shape[0] && A->shape[0] != 1 && B->shape[0] != 1)) {
         return NULL;
     }
     const size_t rows = A->shape[0] > B->shape[0] ? A->shape[0] : B->shape[0];
@@ -292,7 +292,7 @@ NC_Tensor *nc_nn_add(NC_Tape *tape, NC_Arena *scratch,
 NC_Tensor *nc_nn_activation(NC_Tape *tape, NC_Arena *scratch,
                             const NC_Tensor *x, NC_OpType op)
 {
-    if (x == NULL || scratch == NULL || x->ndim != 2) {
+    if (tape == NULL || x == NULL || scratch == NULL || x->ndim != 2) {
         return NULL;
     }
     NC_Tensor *out = nc_tensor_create(scratch, x->shape, x->ndim, true);
@@ -333,7 +333,7 @@ NC_Tensor *nc_nn_activation(NC_Tape *tape, NC_Arena *scratch,
 NC_Tensor *nc_nn_dropout(NC_Tape *tape, NC_Arena *scratch,
                          const NC_Tensor *x, float keep_prob)
 {
-    if (x == NULL || scratch == NULL || x->ndim != 2 ||
+    if (tape == NULL || x == NULL || scratch == NULL || x->ndim != 2 ||
         keep_prob <= 0.0f || keep_prob > 1.0f) {
         return NULL;
     }
@@ -376,19 +376,14 @@ float nc_compute_mse_loss(const NC_Tensor *pred, const NC_Tensor *target)
 void nc_autograd_record_mse(NC_Tape *tape, const NC_Tensor *pred,
                             const NC_Tensor *target)
 {
-    if (tape == NULL || tape->arena == NULL || pred == NULL ||
-        pred->size == 0 || target == NULL ||
+    if (tape == NULL || pred == NULL || pred->size == 0 || target == NULL ||
         tape->count >= tape->capacity) {
         return;
     }
-    NC_OpParams *params = new_params(tape->arena, NC_OP_MSE);
-    if (params == NULL) {
-        return;
-    }
-    params->target = (NC_Tensor *)target;
-    params->scale = 2.0f / (float)pred->size;
-
-    /* A saída do nó é a própria previsão: o backward apenas semeia pred->grad. */
-    nc_autograd_record(tape, (NC_Tensor *)pred, NULL, (NC_Tensor *)pred,
-                       mse_backward, params);
+    /*
+     * Sem alocação por iteração: o alvo viaja em inputs[1] e o fator 2/|pred|
+     * é recalculado no backward. A saída do nó é a própria previsão.
+     */
+    nc_autograd_record(tape, (NC_Tensor *)pred, (NC_Tensor *)target,
+                       (NC_Tensor *)pred, mse_backward, NULL);
 }

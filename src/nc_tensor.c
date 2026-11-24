@@ -215,7 +215,7 @@ static bool checked_mul(size_t a, size_t b, size_t *out)
  * todo offset calculado a partir de índices válidos é menor que size e não
  * pode transbordar — mesmo para tensores construídos fora de nc_tensor_create.
  */
-static bool tensor_layout_valid(const NC_Tensor *t)
+bool nc_tensor_layout_valid(const NC_Tensor *t)
 {
     if (t == NULL || t->data == NULL || t->ndim == 0 || t->ndim > 4) {
         return false;
@@ -439,8 +439,8 @@ static bool conv_input_shapes(const NC_Tensor *input, const NC_Tensor *kernel,
     if (input->ndim != 4 || kernel->ndim != 4 || output->ndim != 4 || stride == 0) {
         return false;
     }
-    if (!tensor_layout_valid(input) || !tensor_layout_valid(kernel) ||
-        !tensor_layout_valid(output)) {
+    if (!nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(kernel) ||
+        !nc_tensor_layout_valid(output)) {
         return false;
     }
 
@@ -535,8 +535,8 @@ void nc_conv2d_transpose(const NC_Tensor *input, const NC_Tensor *kernel,
     if (input->ndim != 4 || kernel->ndim != 4 || output->ndim != 4 || stride == 0) {
         return;
     }
-    if (!tensor_layout_valid(input) || !tensor_layout_valid(kernel) ||
-        !tensor_layout_valid(output)) {
+    if (!nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(kernel) ||
+        !nc_tensor_layout_valid(output)) {
         return;
     }
 
@@ -620,7 +620,7 @@ void nc_max_pool2d(const NC_Tensor *input, NC_Tensor *output,
         output->ndim != 4 || kernel_size == 0 || stride == 0) {
         return;
     }
-    if (!tensor_layout_valid(input) || !tensor_layout_valid(output)) {
+    if (!nc_tensor_layout_valid(input) || !nc_tensor_layout_valid(output)) {
         return;
     }
 

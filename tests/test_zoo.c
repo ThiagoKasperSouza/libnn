@@ -186,6 +186,86 @@ static void test_autoencoder_training(void)
     nc_arena_free(&model);
 }
 
+static float graph_loss_only(NC_Graph *graph, NC_Arena *scratch,
+                             const NC_Tensor *x, const NC_Tensor *target)
+{
+    nc_arena_reset(scratch);
+    NC_Tensor *pred = nc_graph_forward(graph, x, scratch);
+    return pred != NULL ? nc_compute_mse_loss(pred, target) : NAN;
+}
+
+static void test_shared_input_gradient(void)
+{
+    NC_Arena model = nc_arena_init(512 * 1024);
+    NC_Arena scratch = nc_arena_init(512 * 1024);
+    NC_Graph *g = nc_graph_create(&model, 3, 3, 32);
+    NC_CHECK(g != NULL);
+    if (g == NULL) {
+        nc_arena_free(&scratch);
+        nc_arena_free(&model);
+        return;
+    }
+
+    NC_Cell *in = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *hidden = nc_graph_add_cell(g, NC_CELL_HIDDEN, NC_ACT_RELU);
+    NC_Cell *out = nc_graph_add_cell(g, NC_CELL_OUTPUT, NC_ACT_LINEAR);
+    NC_CHECK(in != NULL && hidden != NULL && out != NULL);
+    NC_CHECK(nc_cell_init_params(hidden, &model, 2, 3, true));
+    NC_CHECK(nc_cell_init_params(out, &model, 3, 1, true));
+    NC_CHECK(nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD));
+    NC_CHECK(nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD));
+    NC_CHECK(nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)); /* mesma entrada somada 2x */
+
+    const float xv[] = { 0.5f, -0.2f };
+    const float tv[] = { 1.0f };
+    NC_Tensor *x = make_matrix(&model, 1, 2, xv);
+    NC_Tensor *target = make_matrix(&model, 1, 1, tv);
+
+    nc_arena_reset(&scratch);
+    NC_Tensor *pred = nc_graph_forward(g, x, &scratch);
+    NC_CHECK(pred != NULL);
+    nc_autograd_record_mse(g->tape, pred, target);
+    nc_graph_backward(g);
+    float analytic[6];
+    memcpy(analytic, hidden->weights->grad, sizeof(analytic));
+
+    const float step = 1e-3f;
+    for (size_t i = 0; i < hidden->weights->size; ++i) {
+        const float original = hidden->weights->data[i];
+        hidden->weights->data[i] = original + step;
+        const float plus = graph_loss_only(g, &scratch, x, target);
+        hidden->weights->data[i] = original - step;
+        const float minus = graph_loss_only(g, &scratch, x, target);
+        hidden->weights->data[i] = original;
+        NC_CHECK_NEAR(analytic[i], (plus - minus) / (2.0f * step), 2e-2f);
+    }
+
+    nc_arena_free(&scratch);
+    nc_arena_free(&model);
+}
+
+static void test_noncontiguous_input_rejected(void)
+{
+    NC_Arena model = nc_arena_init(512 * 1024);
+    NC_Arena scratch = nc_arena_init(512 * 1024);
+    NC_Graph *ff = nc_zoo_create_ff(&model, 3, 4, 1);
+    NC_CHECK(ff != NULL);
+
+    const size_t base_shape[2] = { 1, 6 };
+    NC_Tensor *base = nc_tensor_create(&model, base_shape, 2, false);
+    NC_CHECK(base != NULL);
+    NC_Tensor view = *base;
+    view.shape[1] = 3;
+    view.strides[0] = 3;
+    view.strides[1] = 2; /* não contíguo */
+    view.size = 3;
+    NC_CHECK(!nc_tensor_layout_valid(&view));
+    NC_CHECK(nc_graph_forward(ff, &view, &scratch) == NULL);
+
+    nc_arena_free(&scratch);
+    nc_arena_free(&model);
+}
+
 int main(void)
 {
     printf("=== test_zoo (Marco 2) ===\n");
@@ -193,5 +273,7 @@ int main(void)
     test_forward_and_backward();
     test_xor_training();
     test_autoencoder_training();
+    test_shared_input_gradient();
+    test_noncontiguous_input_rejected();
     NC_TEST_SUMMARY("test_zoo");
 }
