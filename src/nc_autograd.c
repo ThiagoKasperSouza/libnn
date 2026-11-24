@@ -25,6 +25,7 @@ NC_Tape *nc_autograd_tape_init(NC_Arena *arena, size_t capacity)
     tape->count = 0;
     tape->capacity = capacity;
     tape->arena = arena;
+    tape->overflow = false;
     return tape;
 }
 
@@ -32,13 +33,23 @@ void nc_autograd_tape_reset(NC_Tape *tape)
 {
     if (tape != NULL) {
         tape->count = 0;
+        tape->overflow = false;
     }
+}
+
+bool nc_autograd_tape_overflow(const NC_Tape *tape)
+{
+    return tape != NULL && tape->overflow;
 }
 
 void nc_autograd_record(NC_Tape *tape, NC_Tensor *in1, NC_Tensor *in2,
                         NC_Tensor *out, NC_BackwardFn fn, void *params)
 {
-    if (tape == NULL || out == NULL || fn == NULL || tape->count >= tape->capacity) {
+    if (tape == NULL || out == NULL || fn == NULL) {
+        return;
+    }
+    if (tape->count >= tape->capacity) {
+        tape->overflow = true; /* nunca descartar silenciosamente */
         return;
     }
     NC_TapeNode *node = &tape->nodes[tape->count++];
@@ -298,14 +309,33 @@ static void softmax_backward(struct NC_TapeNode *node)
     if (x == NULL || y == NULL || y->grad == NULL) {
         return;
     }
-    double dot = 0.0;
-    for (size_t i = 0; i < y->size; ++i) {
-        dot += (double)y->grad[flat_index(y, i)] * y->data[flat_index(y, i)];
+    if (y->ndim != 2 || y->shape[1] <= 1) {
+        double dot = 0.0;
+        for (size_t i = 0; i < y->size; ++i) {
+            dot += (double)y->grad[flat_index(y, i)] * y->data[flat_index(y, i)];
+        }
+        for (size_t i = 0; i < x->size; ++i) {
+            const size_t yi = flat_index(y, i);
+            accumulate(x, flat_index(x, i),
+                       (float)(y->data[yi] * ((double)y->grad[yi] - dot)));
+        }
+        return;
     }
-    for (size_t i = 0; i < x->size; ++i) {
-        const size_t yi = flat_index(y, i);
-        accumulate(x, flat_index(x, i),
-                   (float)(y->data[yi] * ((double)y->grad[yi] - dot)));
+
+    /* Softmax 2D com mais de uma coluna é por linha; [slots,1] é global. */
+    const size_t rows = y->shape[0];
+    const size_t cols = y->shape[1];
+    for (size_t r = 0; r < rows; ++r) {
+        double dot = 0.0;
+        for (size_t c = 0; c < cols; ++c) {
+            const size_t yi = r * y->strides[0] + c * y->strides[1];
+            dot += (double)y->grad[yi] * y->data[yi];
+        }
+        for (size_t c = 0; c < cols; ++c) {
+            const size_t yi = r * y->strides[0] + c * y->strides[1];
+            const size_t xi = r * x->strides[0] + c * x->strides[1];
+            accumulate(x, xi, (float)(y->data[yi] * ((double)y->grad[yi] - dot)));
+        }
     }
 }
 
@@ -678,8 +708,11 @@ float nc_compute_mse_loss(const NC_Tensor *pred, const NC_Tensor *target)
 void nc_autograd_record_mse(NC_Tape *tape, const NC_Tensor *pred,
                             const NC_Tensor *target)
 {
-    if (tape == NULL || pred == NULL || pred->size == 0 || target == NULL ||
-        tape->count >= tape->capacity) {
+    if (tape == NULL || pred == NULL || pred->size == 0 || target == NULL) {
+        return;
+    }
+    if (tape->count >= tape->capacity) {
+        tape->overflow = true;
         return;
     }
     /*
@@ -887,23 +920,94 @@ NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
     if (out == NULL) {
         return NULL;
     }
-    float max_value = -INFINITY;
-    for (size_t i = 0; i < x->size; ++i) {
-        const float v = x->data[flat_index(x, i)];
-        if (v > max_value) max_value = v;
-    }
-    double sum = 0.0;
-    for (size_t i = 0; i < x->size; ++i) {
-        const double e = exp((double)x->data[flat_index(x, i)] - max_value);
-        out->data[i] = (float)e;
-        sum += e;
-    }
-    if (sum <= 0.0) {
-        return NULL;
-    }
-    for (size_t i = 0; i < out->size; ++i) {
-        out->data[i] = (float)((double)out->data[i] / sum);
+    if (x->ndim == 2 && x->shape[1] > 1) {
+        const size_t rows = x->shape[0];
+        const size_t cols = x->shape[1];
+        for (size_t r = 0; r < rows; ++r) {
+            float max_value = -INFINITY;
+            for (size_t c = 0; c < cols; ++c) {
+                const float v = x->data[r * x->strides[0] + c * x->strides[1]];
+                if (v > max_value) max_value = v;
+            }
+            double sum = 0.0;
+            for (size_t c = 0; c < cols; ++c) {
+                const double e = exp((double)x->data[r * x->strides[0] +
+                                                     c * x->strides[1]] - max_value);
+                out->data[r * out->strides[0] + c * out->strides[1]] = (float)e;
+                sum += e;
+            }
+            if (sum <= 0.0) {
+                return NULL;
+            }
+            for (size_t c = 0; c < cols; ++c) {
+                const size_t oi = r * out->strides[0] + c * out->strides[1];
+                out->data[oi] = (float)((double)out->data[oi] / sum);
+            }
+        }
+    } else {
+        float max_value = -INFINITY;
+        for (size_t i = 0; i < x->size; ++i) {
+            const float v = x->data[flat_index(x, i)];
+            if (v > max_value) max_value = v;
+        }
+        double sum = 0.0;
+        for (size_t i = 0; i < x->size; ++i) {
+            const double e = exp((double)x->data[flat_index(x, i)] - max_value);
+            out->data[i] = (float)e;
+            sum += e;
+        }
+        if (sum <= 0.0) {
+            return NULL;
+        }
+        for (size_t i = 0; i < out->size; ++i) {
+            out->data[i] = (float)((double)out->data[i] / sum);
+        }
     }
     nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, softmax_backward, NULL);
+    return out;
+}
+
+static void transpose_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *x = node->inputs[0];
+    const NC_Tensor *y = node->output;
+    if (x == NULL || y == NULL || y->grad == NULL || x->ndim != 2) {
+        return;
+    }
+    const size_t rows = x->shape[0];
+    const size_t cols = x->shape[1];
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            const size_t yi = j * y->strides[0] + i * y->strides[1];
+            const size_t xi = i * x->strides[0] + j * x->strides[1];
+            accumulate(x, xi, y->grad[yi]);
+        }
+    }
+}
+
+NC_Tensor *nc_nn_transpose(NC_Tape *tape, NC_Arena *scratch,
+                           const NC_Tensor *x)
+{
+    if (tape == NULL || scratch == NULL || x == NULL || x->ndim != 2) {
+        return NULL;
+    }
+    NC_Tensor *out = (NC_Tensor *)nc_arena_alloc(scratch, sizeof(*out),
+                                                 alignof(NC_Tensor));
+    if (out == NULL) {
+        return NULL;
+    }
+    *out = *x;
+    out->shape[0] = x->shape[1];
+    out->shape[1] = x->shape[0];
+    out->strides[0] = x->strides[1];
+    out->strides[1] = x->strides[0];
+    out->grad = (float *)nc_arena_alloc(scratch, x->size * sizeof(float),
+                                        NC_TENSOR_ALIGNMENT);
+    if (out->grad == NULL) {
+        return NULL;
+    }
+    memset(out->grad, 0, x->size * sizeof(float));
+    out->requires_grad = true;
+    nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, transpose_backward, NULL);
     return out;
 }

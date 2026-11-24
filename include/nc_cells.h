@@ -132,6 +132,9 @@ bool nc_cell_init_conv_params(NC_Cell *cell, NC_Arena *arena,
 /* Zera os ponteiros de estado recorrente (chamado no início de cada sequência). */
 void nc_cell_reset_state(NC_Cell *cell);
 
+/* Zera os gradientes dos tensores de estado ainda referenciados pela union. */
+void nc_cell_zero_state_grads(NC_Cell *cell);
+
 /* Executa a célula; retorna NULL para tipos ainda não implementados. */
 NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
                            NC_Tape *tape, NC_Arena *scratch);

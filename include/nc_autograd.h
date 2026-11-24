@@ -23,7 +23,8 @@ typedef enum {
     NC_OP_AVGPOOL,
     NC_OP_MUL,
     NC_OP_SCALE,
-    NC_OP_SOFTMAX
+    NC_OP_SOFTMAX,
+    NC_OP_TRANSPOSE
 } NC_OpType;
 
 struct NC_TapeNode;
@@ -54,6 +55,7 @@ typedef struct {
     size_t count;
     size_t capacity;
     NC_Arena *arena; /* arena persistente, usada para parâmetros dos nós */
+    bool overflow;   /* true se algum nó foi descartado por capacidade */
 } NC_Tape;
 
 /*
@@ -75,6 +77,9 @@ void nc_autograd_record(NC_Tape *tape, NC_Tensor *in1, NC_Tensor *in2,
 /* Executa a fita em ordem reversa, acumulando gradientes em inputs[].grad. */
 void nc_autograd_backward(NC_Tape *tape);
 
+/* Consulta se a última gravação excedeu a capacidade (BPTT truncado). */
+bool nc_autograd_tape_overflow(const NC_Tape *tape);
+
 /* ------------------------ Operações diferenciáveis ------------------------ */
 
 NC_Tensor *nc_nn_matmul(NC_Tape *tape, NC_Arena *scratch,
@@ -91,6 +96,10 @@ NC_Tensor *nc_nn_scale(NC_Tape *tape, NC_Arena *scratch,
                        const NC_Tensor *x, float scale);
 NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
                          const NC_Tensor *x);
+
+/* Transposta 2D diferenciável (view 2D com gradiente próprio). */
+NC_Tensor *nc_nn_transpose(NC_Tape *tape, NC_Arena *scratch,
+                           const NC_Tensor *x);
 
 /* Identidade diferenciável para qualquer ndim (1–4). */
 NC_Tensor *nc_nn_identity(NC_Tape *tape, NC_Arena *scratch,

@@ -4,7 +4,7 @@
 #include <stdalign.h>
 
 /* Capacidade suficiente para sequências desdobradas com LSTM/GRU. */
-#define ZOO_TAPE_CAPACITY 1024
+#define ZOO_TAPE_CAPACITY 8192
 
 static NC_Graph *new_graph(NC_Arena *model, size_t cell_count, size_t edge_count)
 {

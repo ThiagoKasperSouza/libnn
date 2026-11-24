@@ -47,8 +47,8 @@ NC_Tensor **nc_sequence_forward(NC_Graph *graph, const NC_Tensor *x_seq,
         view->requires_grad = false;
 
         outputs[t] = nc_graph_step(graph, view, scratch);
-        if (outputs[t] == NULL) {
-            return NULL;
+        if (outputs[t] == NULL || nc_autograd_tape_overflow(graph->tape)) {
+            return NULL; /* BPTT truncado: melhor falhar que propagar erro parcial */
         }
     }
     return outputs;

@@ -20,7 +20,8 @@ Detalhes do desdobramento temporal, do BPTT e das quatro arquiteturas recorrente
 
 - `nc_nn_mul` — produto elemento a elemento (Hadamard), com `dA += dY·B` e `dB += dY·A`.
 - `nc_nn_scale` — multiplicação por escalar (gradiente escalado).
-- `nc_nn_softmax` — normalização exponencial com o Jacobiano padrão no backward.
+- `nc_nn_softmax` — normalização exponencial com o Jacobiano padrão no backward; em tensores 2D com mais de uma coluna a normalização é por linha, e em `[slots,1]` (caso da NTM) é global — softmax de um único elemento por linha teria gradiente zero.
+- `nc_nn_transpose` — transposta 2D diferenciável, usada pela NTM; a view compartilha os dados, mas possui buffer de gradiente próprio e um backward que espalha o gradiente de volta à origem.
 
 Sem elas, as equações de portes LSTM/GRU e o endereçamento da NTM não seriam diferenciáveis pela fita existente.
 
@@ -28,7 +29,9 @@ Sem elas, as equações de portes LSTM/GRU e o endereçamento da NTM não seriam
 
 `nc_sequence_forward(graph, x_seq, T, scratch)` recebe `x_seq [T,N,F]`, cria uma view 2D `[N,F]` por passo e chama `nc_graph_step()` sem resetar a fita. As ativações de cada passo ficam vivas na scratch arena até o backward. O estado recorrente (`h`, `c`, banco de memória) vive na célula e é atualizado a cada passo.
 
-Como cada passo registra seus nós na **mesma** fita, `nc_autograd_backward()` propaga o erro desde o último passo até o primeiro — o BPTT surge naturalmente, sem um mecanismo separado. `nc_sequence_backward()` apenas zera os gradientes acumulados e dispara a fita.
+Como cada passo registra seus nós na **mesma** fita, `nc_autograd_backward()` propaga o erro desde o último passo até o primeiro — o BPTT surge naturalmente, sem um mecanismo separado. `nc_sequence_backward()` zera os gradientes (inclusive os dos estados recorrentes) e dispara a fita.
+
+A fita tem capacidade fixa (`ZOO_TAPE_CAPACITY = 8192`, configurável em `nc_graph_create`). Se um passo exceder a capacidade, `nc_autograd_record()` marca `tape->overflow` e `nc_sequence_forward()` retorna `NULL` — um BPTT truncado falha explicitamente em vez de produzir gradientes parciais.
 
 `nc_sequence_reset_state()` deve ser chamado no início de cada sequência. A scratch arena também deve ser resetada pelo chamador a cada iteração de treino.
 
@@ -39,7 +42,7 @@ Como cada passo registra seus nós na **mesma** fita, `nc_autograd_backward()` p
 - **GRU** — portes `z` e `r`, candidato `c~ = tanh(x·W + r·(h·W_hh) + b)` e `h_t = h_{t-1} + z·(c~ - h_{t-1})`.
 - **NTM** — chave `k = tanh(x·W_key)`, similaridade `M·kᵀ`, pesos de atenção por softmax, leitura `wᵀ·M`, escrita `M ← M + w·tanh(x·W_write)`. O endereçamento é por conteúdo e o caminho de leitura é diferenciável; a escrita atualiza o estado sem gradientes persistentes entre passos.
 
-Cada célula mantém seus estados na union `NC_Cell.state`. `nc_graph_ensure_adam_states()` registra todos os pesos de portes como parâmetros treináveis.
+Cada célula mantém seus estados na union `NC_Cell.state`. `nc_cell_reset_state()` zera a union inteira; `nc_cell_zero_state_grads()` zera os gradientes dos tensores de estado ainda vivos, por tipo de célula. `nc_graph_ensure_adam_states()` valida a capacidade total antes de registrar os parâmetros e só marca `adam_ready` quando todos os pesos de portes foram incluídos.
 
 ## 5. Decisões e limitações
 
@@ -52,8 +55,10 @@ Cada célula mantém seus estados na union `NC_Cell.state`. `nc_graph_ensure_ada
 
 ```
 make test → arena 357/357 · tensor 234124/234124 · autograd 62/62 · zoo 65/65
-            spatial 789/789 · sequence 587/587
+            spatial 789/789 · sequence 615/615
 make asan → seis binários sem erros nem vazamentos
 ```
 
 Destaques: gradiente de `W_xh` e `W_hh` da RNN conferido por diferenças finitas ao longo de 4 passos; as quatro arquiteturas com forward/backward e gradientes não nulos; treino de GRU em cópia com atraso com perda de `1.29` para `0.00`.
+
+Regressões da revisão: `gate_weights[0]` da NTM recebe gradiente não nulo; `mul`/`scale` com gradientes analíticos conhecidos, softmax 2D batched por diferenças finitas, transposição com gradiente 1:1, detecção de overflow da fita, contagem de 14 estados Adam na LSTM e limpeza completa da union no reset.

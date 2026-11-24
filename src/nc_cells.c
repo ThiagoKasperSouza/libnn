@@ -165,13 +165,48 @@ void nc_cell_reset_state(NC_Cell *cell)
     if (cell == NULL) {
         return;
     }
-    cell->state.recurrent.hidden = NULL;
-    cell->state.lstm.hidden = NULL;
-    cell->state.lstm.cell_state = NULL;
-    cell->state.gru.hidden = NULL;
-    cell->state.ntm.memory_bank = NULL;
-    cell->state.ntm.read_head = NULL;
-    cell->state.ntm.write_head = NULL;
+    memset(&cell->state, 0, sizeof(cell->state));
+}
+
+static void zero_state_tensor_grad(NC_Tensor *t)
+{
+    if (t != NULL && t->grad != NULL) {
+        memset(t->grad, 0, t->size * sizeof(float));
+    }
+}
+
+void nc_cell_zero_state_grads(NC_Cell *cell)
+{
+    if (cell == NULL) {
+        return;
+    }
+    /* A union só contém ponteiros válidos para o tipo da célula. */
+    switch (cell->type) {
+    case NC_CELL_RECURRENT:
+        zero_state_tensor_grad(cell->state.recurrent.hidden);
+        break;
+    case NC_CELL_MEMORY:
+        zero_state_tensor_grad(cell->state.lstm.hidden);
+        zero_state_tensor_grad(cell->state.lstm.cell_state);
+        zero_state_tensor_grad(cell->state.lstm.gate_input);
+        zero_state_tensor_grad(cell->state.lstm.gate_forget);
+        zero_state_tensor_grad(cell->state.lstm.gate_output);
+        break;
+    case NC_CELL_DIFFERENT_MEMORY:
+        if (cell->gate_weights[2] != NULL) { /* GRU */
+            zero_state_tensor_grad(cell->state.gru.hidden);
+            zero_state_tensor_grad(cell->state.gru.gate_z);
+            zero_state_tensor_grad(cell->state.gru.gate_r);
+            zero_state_tensor_grad(cell->state.gru.candidate);
+        } else { /* NTM */
+            zero_state_tensor_grad(cell->state.ntm.memory_bank);
+            zero_state_tensor_grad(cell->state.ntm.read_head);
+            zero_state_tensor_grad(cell->state.ntm.write_head);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 static NC_Tensor *ensure_state(NC_Arena *scratch, NC_Tensor **slot,
@@ -197,24 +232,6 @@ static NC_Tensor *linear_gate(NC_Tape *tape, NC_Arena *scratch,
     z = nc_nn_add(tape, scratch, z, zh);
     z = nc_nn_add(tape, scratch, z, bias);
     return nc_nn_activation(tape, scratch, z, activation);
-}
-
-static NC_Tensor *transpose_view(NC_Arena *scratch, const NC_Tensor *t)
-{
-    NC_Tensor *view = (NC_Tensor *)nc_arena_alloc(scratch, sizeof(*view),
-                                                  alignof(NC_Tensor));
-    if (view == NULL) {
-        return NULL;
-    }
-    *view = *t;
-    view->shape[0] = t->shape[1];
-    view->shape[1] = t->shape[0];
-    view->strides[0] = t->strides[1];
-    view->strides[1] = t->strides[0];
-    view->size = t->size;
-    view->grad = NULL;
-    view->requires_grad = false;
-    return view;
 }
 
 static NC_Tensor *rnn_forward(NC_Cell *cell, const NC_Tensor *input,
@@ -348,10 +365,10 @@ static NC_Tensor *ntm_forward(NC_Cell *cell, const NC_Tensor *input,
 
     NC_Tensor *key_pre = nc_nn_matmul(tape, scratch, input, cell->gate_weights[0]);
     NC_Tensor *key = nc_nn_activation(tape, scratch, key_pre, NC_OP_TANH);
-    NC_Tensor *key_t = transpose_view(scratch, key);
+    NC_Tensor *key_t = nc_nn_transpose(tape, scratch, key);
     NC_Tensor *scores = nc_nn_matmul(tape, scratch, mem, key_t);
     NC_Tensor *weights = nc_nn_softmax(tape, scratch, scores);
-    NC_Tensor *weights_t = transpose_view(scratch, weights);
+    NC_Tensor *weights_t = nc_nn_transpose(tape, scratch, weights);
     NC_Tensor *read = nc_nn_matmul(tape, scratch, weights_t, mem);
 
     NC_Tensor *write_pre = nc_nn_matmul(tape, scratch, input, cell->gate_weights[1]);

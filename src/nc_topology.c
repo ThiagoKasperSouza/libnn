@@ -22,7 +22,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
                                                edge_capacity * sizeof(NC_Edge),
                                                alignof(NC_Edge));
     NC_AdamState *adam = (NC_AdamState *)nc_arena_alloc(
-        model_arena, cell_capacity * 16 * sizeof(NC_AdamState),
+        model_arena, cell_capacity * 20 * sizeof(NC_AdamState),
         alignof(NC_AdamState));
     NC_Tape *tape = nc_autograd_tape_init(model_arena, tape_capacity);
 
@@ -35,7 +35,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
     memset(graph, 0, sizeof(*graph));
     memset(cells, 0, cell_capacity * sizeof(NC_Cell));
     memset(edges, 0, edge_capacity * sizeof(NC_Edge));
-    memset(adam, 0, cell_capacity * 16 * sizeof(NC_AdamState));
+    memset(adam, 0, cell_capacity * 20 * sizeof(NC_AdamState));
 
     graph->model_arena = model_arena;
     graph->cells = cells;
@@ -43,7 +43,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
     graph->edges = edges;
     graph->edge_capacity = edge_capacity;
     graph->adam = adam;
-    graph->adam_capacity = cell_capacity * 16;
+    graph->adam_capacity = cell_capacity * 20;
     graph->tape = tape;
     return graph;
 }
@@ -204,6 +204,7 @@ void nc_graph_zero_grads(NC_Graph *graph)
         if (cell->activity != NULL && cell->activity->grad != NULL) {
             memset(cell->activity->grad, 0, cell->activity->size * sizeof(float));
         }
+        nc_cell_zero_state_grads(cell);
     }
 }
 
@@ -239,9 +240,37 @@ void nc_graph_backward_no_zero(NC_Graph *graph)
     graph_backward_impl(graph, false);
 }
 
+static size_t trainable_param_count(const NC_Graph *graph)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < graph->cell_count; ++i) {
+        const NC_Cell *cell = &graph->cells[i];
+        const NC_Tensor *params[15] = {
+            cell->weights, cell->recurrent_weights, cell->bias,
+            cell->gate_weights[0], cell->gate_weights[1],
+            cell->gate_weights[2], cell->gate_weights[3],
+            cell->gate_recurrent[0], cell->gate_recurrent[1],
+            cell->gate_recurrent[2], cell->gate_recurrent[3],
+            cell->gate_bias[0], cell->gate_bias[1],
+            cell->gate_bias[2], cell->gate_bias[3]
+        };
+        for (size_t p = 0; p < 15; ++p) {
+            if (params[p] != NULL && params[p]->requires_grad) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
 void nc_graph_ensure_adam_states(NC_Graph *graph)
 {
     if (graph == NULL || graph->adam_ready) {
+        return;
+    }
+    /* Não marcar pronto se a capacidade for insuficiente: evita registrar
+     * apenas parte dos portes silenciosamente. */
+    if (trainable_param_count(graph) > graph->adam_capacity) {
         return;
     }
     for (size_t i = 0; i < graph->cell_count; ++i) {
@@ -267,6 +296,10 @@ void nc_graph_ensure_adam_states(NC_Graph *graph)
                                         param->ndim, false);
             state->v = nc_tensor_create(graph->model_arena, param->shape,
                                         param->ndim, false);
+            if (state->m == NULL || state->v == NULL) {
+                graph->adam_count = 0;
+                return; /* tenta novamente na próxima chamada */
+            }
             state->step = 0;
         }
     }
