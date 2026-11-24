@@ -52,7 +52,19 @@ typedef struct {
     NC_Tensor *gate_input;
     NC_Tensor *gate_forget;
     NC_Tensor *gate_output;
+    NC_Tensor *hidden;
 } NC_CellLSTMState;
+
+typedef struct {
+    NC_Tensor *hidden;
+} NC_CellRecurrentState;
+
+typedef struct {
+    NC_Tensor *hidden;
+    NC_Tensor *gate_z;
+    NC_Tensor *gate_r;
+    NC_Tensor *candidate;
+} NC_CellGRUState;
 
 typedef struct {
     NC_Tensor *memory_bank;
@@ -75,9 +87,16 @@ typedef struct NC_Cell {
     size_t id;
     NC_CellType type;
     NC_Tensor *weights;
+    NC_Tensor *recurrent_weights;
     NC_Tensor *bias;
     NC_Tensor *activity;
     NC_Activation activation;
+    size_t memory_slots; /* NTM: linhas do banco de memória */
+
+    /* Porte separados: [0..gates-1] = entrada, recorrrente e viés. */
+    NC_Tensor *gate_weights[4];
+    NC_Tensor *gate_recurrent[4];
+    NC_Tensor *gate_bias[4];
 
     union {
         NC_CellProbabilisticState probabilistic;
@@ -85,6 +104,8 @@ typedef struct NC_Cell {
         NC_CellLSTMState lstm;
         NC_CellNTMState ntm;
         NC_CellConvState conv;
+        NC_CellRecurrentState recurrent;
+        NC_CellGRUState gru;
         struct {
             float noise_std;
             float dropout_rate;
@@ -99,10 +120,17 @@ NC_Cell *nc_cell_create(NC_Arena *arena, size_t id, NC_CellType type,
 bool nc_cell_init_params(NC_Cell *cell, NC_Arena *arena,
                          size_t in_dim, size_t out_dim, bool with_bias);
 
+/* Cria pesos de entrada/recorrentes/viés para `gates` portes (1..4). */
+bool nc_cell_init_gated_params(NC_Cell *cell, NC_Arena *arena,
+                               size_t in_dim, size_t hidden_dim, size_t gates);
+
 /* Cria weights convolucionais [c_out, c_in, k_h, k_w] e bias opcional. */
 bool nc_cell_init_conv_params(NC_Cell *cell, NC_Arena *arena,
                               size_t c_out, size_t c_in,
                               size_t k_h, size_t k_w, bool with_bias);
+
+/* Zera os ponteiros de estado recorrente (chamado no início de cada sequência). */
+void nc_cell_reset_state(NC_Cell *cell);
 
 /* Executa a célula; retorna NULL para tipos ainda não implementados. */
 NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,

@@ -1,9 +1,10 @@
 #include "nc_zoo.h"
 
+#include <math.h>
 #include <stdalign.h>
 
-/* Capacidade generosa o suficiente para as topologias feedforward do Marco 2. */
-#define ZOO_TAPE_CAPACITY 128
+/* Capacidade suficiente para sequências desdobradas com LSTM/GRU. */
+#define ZOO_TAPE_CAPACITY 1024
 
 static NC_Graph *new_graph(NC_Arena *model, size_t cell_count, size_t edge_count)
 {
@@ -283,4 +284,104 @@ NC_GAN *nc_zoo_create_gan(NC_Arena *model, size_t latent_dim, size_t data_dim)
         return NULL;
     }
     return gan;
+}
+
+/* ------------------------- Topologias do Marco 4 ----------------------- */
+
+static NC_Graph *create_recurrent(NC_Arena *model, NC_CellType memory_type,
+                                  size_t input_dim, size_t hidden_dim,
+                                  size_t output_dim, size_t gates)
+{
+    if (model == NULL || input_dim == 0 || hidden_dim == 0 || output_dim == 0) {
+        return NULL;
+    }
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) {
+        return NULL;
+    }
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *memory = nc_graph_add_cell(g, memory_type, NC_ACT_LINEAR);
+    NC_Cell *out = add_layer(g, NC_CELL_OUTPUT, NC_ACT_LINEAR,
+                             hidden_dim, output_dim);
+    if (input == NULL || memory == NULL || out == NULL) {
+        return NULL;
+    }
+
+    bool params_ok = false;
+    if (gates == 0) {
+        params_ok = nc_cell_init_params(memory, model, input_dim, hidden_dim, true);
+        if (params_ok) {
+            const size_t rs[2] = { hidden_dim, hidden_dim };
+            memory->recurrent_weights =
+                nc_tensor_create(model, rs, 2, true);
+            params_ok = memory->recurrent_weights != NULL;
+            if (params_ok) {
+                nc_tensor_fill_random_normal(memory->recurrent_weights, 0.0f,
+                    sqrtf(2.0f / (float)(hidden_dim + hidden_dim)));
+            }
+        }
+    } else {
+        params_ok = nc_cell_init_gated_params(memory, model, input_dim,
+                                              hidden_dim, gates);
+    }
+    if (!params_ok ||
+        !nc_graph_connect(g, 0, 1, NC_EDGE_RECURRENT) ||
+        !nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)) {
+        return NULL;
+    }
+    return g;
+}
+
+NC_Graph *nc_zoo_create_rnn(NC_Arena *model, size_t input_dim,
+                            size_t hidden_dim, size_t output_dim)
+{
+    return create_recurrent(model, NC_CELL_RECURRENT, input_dim, hidden_dim,
+                            output_dim, 0);
+}
+
+NC_Graph *nc_zoo_create_lstm(NC_Arena *model, size_t input_dim,
+                             size_t hidden_dim, size_t output_dim)
+{
+    return create_recurrent(model, NC_CELL_MEMORY, input_dim, hidden_dim,
+                            output_dim, 4);
+}
+
+NC_Graph *nc_zoo_create_gru(NC_Arena *model, size_t input_dim,
+                            size_t hidden_dim, size_t output_dim)
+{
+    return create_recurrent(model, NC_CELL_DIFFERENT_MEMORY, input_dim,
+                            hidden_dim, output_dim, 3);
+}
+
+NC_Graph *nc_zoo_create_ntm(NC_Arena *model, size_t input_dim, size_t slots,
+                            size_t mem_dim, size_t output_dim)
+{
+    if (model == NULL || input_dim == 0 || slots == 0 || mem_dim == 0 ||
+        output_dim == 0) {
+        return NULL;
+    }
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) {
+        return NULL;
+    }
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *memory = nc_graph_add_cell(g, NC_CELL_DIFFERENT_MEMORY, NC_ACT_LINEAR);
+    NC_Cell *out = add_layer(g, NC_CELL_OUTPUT, NC_ACT_LINEAR,
+                             mem_dim, output_dim);
+    if (input == NULL || memory == NULL || out == NULL) {
+        return NULL;
+    }
+    const size_t ws[2] = { input_dim, mem_dim };
+    memory->gate_weights[0] = nc_tensor_create(model, ws, 2, true);
+    memory->gate_weights[1] = nc_tensor_create(model, ws, 2, true);
+    memory->memory_slots = slots;
+    if (memory->gate_weights[0] == NULL || memory->gate_weights[1] == NULL) {
+        return NULL;
+    }
+    const float stddev = sqrtf(2.0f / (float)(input_dim + mem_dim));
+    nc_tensor_fill_random_normal(memory->gate_weights[0], 0.0f, stddev);
+    nc_tensor_fill_random_normal(memory->gate_weights[1], 0.0f, stddev);
+
+    return nc_graph_connect(g, 0, 1, NC_EDGE_RECURRENT) &&
+           nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD) ? g : NULL;
 }

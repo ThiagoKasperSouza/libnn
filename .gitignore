@@ -12,8 +12,12 @@ tests/test_zoo
 tests/test_zoo_asan
 tests/test_spatial
 tests/test_spatial_asan
+tests/test_sequence
+tests/test_sequence_asan
 examples/marco1_basics
 examples/xor_perceptron
 examples/dae_example
 examples/dcn_synthetic
 examples/gan_toy
+examples/lstm_sequence
+examples/ntm_demo

@@ -2,7 +2,7 @@
 
 SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdlib`, `math`, `string`, `stdint`, `stddef`, `stdbool`). A arquitetura completa e o roadmap estão em [`Plano de Arquitetura_ SDK de Redes Neurais em C Puro (Zero Dependências).md`](./Plano%20de%20Arquitetura_%20SDK%20de%20Redes%20Neurais%20em%20C%20Puro%20%28Zero%20Depend%C3%AAncias%29.md).
 
-**Status:** Marcos 1 a 3 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md), [`docs/MARCO2.md`](./docs/MARCO2.md) e [`docs/MARCO3.md`](./docs/MARCO3.md).
+**Status:** Marcos 1 a 4 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md), [`docs/MARCO2.md`](./docs/MARCO2.md), [`docs/MARCO3.md`](./docs/MARCO3.md) e [`docs/MARCO4.md`](./docs/MARCO4.md).
 
 ## Marcos
 
@@ -11,7 +11,7 @@ SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdli
 | 1 | Arena, tensores, matmul com tiling, RNG, testes de memória | ✅ implementado |
 | 2 | Tape de autograd, Adam, P/FF/DFF/AE/DAE/SAE/DRN | ✅ implementado |
 | 3 | `im2col` + GEMM, conv transposta, pooling, DCN/DN/DCIGN/GAN | ✅ implementado |
-| 4 | Unrolling temporal, BPTT, LSTM/GRU/NTM | ⏳ |
+| 4 | Unrolling temporal, BPTT, RNN/LSTM/GRU/NTM | ✅ implementado |
 | 5 | Energia, spiking e reservatórios | ⏳ |
 | 6 | Renderizador SVG e certificação | ⏳ |
 
@@ -40,26 +40,31 @@ libnn/
 │   ├── nc_autograd.h  # fita e operações diferenciáveis
 │   ├── nc_cells.h     # 13 tipos de célula e ativações
 │   ├── nc_topology.h  # NC_Graph, arestas e forward/backward
-│   ├── nc_trainers.h  # Adam e MSE
-│   └── nc_zoo.h       # construtores P/FF/DFF/AE/DAE/SAE/DRN + DCN/DN/DCIGN/GAN
+│   ├── nc_trainers.h  # Adam, MSE e treino GAN
+│   ├── nc_sequence.h  # unrolling temporal e BPTT
+│   └── nc_zoo.h       # construtores das 11 topologias implementadas
 ├── src/                # um .c por header acima (exceto neurochart.h)
 ├── examples/
 │   ├── marco1_basics.c
 │   ├── xor_perceptron.c
 │   ├── dae_example.c
 │   ├── dcn_synthetic.c
-│   └── gan_toy.c
+│   ├── gan_toy.c
+│   ├── lstm_sequence.c
+│   └── ntm_demo.c
 ├── tests/
 │   ├── test_common.h
 │   ├── test_arena.c
 │   ├── test_tensor.c
 │   ├── test_autograd.c
 │   ├── test_zoo.c
-│   └── test_spatial.c
+│   ├── test_spatial.c
+│   └── test_sequence.c
 ├── docs/
 │   ├── MARCO1.md
 │   ├── MARCO2.md
-│   └── MARCO3.md
+│   ├── MARCO3.md
+│   └── MARCO4.md
 ├── Makefile
 └── README.md
 ```
@@ -163,9 +168,20 @@ Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
 | `nc_zoo_create_{dcn,dn,dcign}` | DCN, DN e autoencoder convolucional |
 | `nc_zoo_create_gan / nc_train_gan_step` | Par gerador/discriminador e passo minimax |
 
+## API do Marco 4
+
+| Função | Contrato |
+| :-- | :-- |
+| `nc_nn_mul / nc_nn_scale / nc_nn_softmax` | Operações diferenciáveis usadas por portes e atenção |
+| `nc_sequence_forward(g, x_seq[3D], T, scratch)` | Desdobra T passos numa única fita; retorna as saídas por passo |
+| `nc_sequence_backward(g)` | Zera gradiente e roda o BPTT na fita completa |
+| `nc_sequence_reset_state(g)` | Limpa h/c/memória antes de nova sequência |
+| `nc_cell_init_gated_params` | Pesos de entrada/recorrência/viés por porte |
+| `nc_zoo_create_{rnn,lstm,gru,ntm}` | Fábricas recorrentes |
+
 ## Validação
 
-`make test` cobre cinco binários: arena/tensores (Marco 1), gradientes analíticos, estrutura das 7 topologias feedforward, treino de XOR e reconstrução AE/DAE/SAE/DRN (Marco 2) e, no Marco 3, im2col vs. convolução direta, gradientes espaciais por diferenças finitas, DCN/DN/DCIGN com perda decrescente e 200 passos de GAN. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
+`make test` cobre seis binários: arena/tensores (Marco 1), gradientes analíticos, estrutura das 7 topologias feedforward, treino de XOR e reconstrução AE/DAE/SAE/DRN (Marco 2), im2col vs. convolução direta e gradientes espaciais com `N>1, C_in>1` (Marco 3) e, no Marco 4, BPTT verificado por diferenças finitas em `W_xh`/`W_hh`, forward/backward de RNN/LSTM/GRU/NTM e treino de GRU em cópia com atraso. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
 
 ## Limitações conhecidas
 
@@ -174,4 +190,5 @@ Exemplos completos: [`examples/marco1_basics.c`](./examples/marco1_basics.c),
 - A GAN usa MSE como objective adversarial, não BCE.
 - O RNG é estado global, não thread-safe.
 - Alias entre `C` e as entradas de `nc_matmul` usa `malloc` temporário (caminho excepcional, fora do hot path).
-- Células spiking e recorrentes chegam nos Marcos 4–5; `nc_render` (SVG) no Marco 6.
+- A NTM usa produto escalar não normalizado e apenas batch 1; a escrita não propaga gradiente entre passos.
+- Células spiking/energéticas chegam no Marco 5; `nc_render` (SVG) no Marco 6.

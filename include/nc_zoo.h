@@ -42,4 +42,15 @@ typedef struct {
 
 NC_GAN *nc_zoo_create_gan(NC_Arena *model, size_t latent_dim, size_t data_dim);
 
+/* ------------------------- Topologias do Marco 4 ----------------------- */
+
+NC_Graph *nc_zoo_create_rnn(NC_Arena *model, size_t input_dim,
+                            size_t hidden_dim, size_t output_dim);
+NC_Graph *nc_zoo_create_lstm(NC_Arena *model, size_t input_dim,
+                             size_t hidden_dim, size_t output_dim);
+NC_Graph *nc_zoo_create_gru(NC_Arena *model, size_t input_dim,
+                            size_t hidden_dim, size_t output_dim);
+NC_Graph *nc_zoo_create_ntm(NC_Arena *model, size_t input_dim, size_t slots,
+                            size_t mem_dim, size_t output_dim);
+
 #endif /* NC_ZOO_H */

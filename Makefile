@@ -15,10 +15,12 @@ OBJS := $(SRCS:.c=.o)
 HDRS := $(wildcard include/*.h)
 LIB  := libnn.a
 
-TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo tests/test_spatial
+TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo \
+         tests/test_spatial tests/test_sequence
 SAN_TESTS := $(TESTS:tests/%=tests/%_asan)
 EXAMPLES := examples/marco1_basics examples/xor_perceptron examples/dae_example \
-            examples/dcn_synthetic examples/gan_toy
+            examples/dcn_synthetic examples/gan_toy \
+            examples/lstm_sequence examples/ntm_demo
 
 .PHONY: all lib tests test asan valgrind examples run_example run_examples clean
 

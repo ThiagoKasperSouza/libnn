@@ -261,6 +261,54 @@ static void mse_backward(struct NC_TapeNode *node)
     }
 }
 
+/* --------------- Backward elementwise (Marco 4) ------------------------ */
+
+static void mul_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *a = node->inputs[0];
+    NC_Tensor *b = node->inputs[1];
+    const NC_Tensor *dy = node->output;
+    if (a == NULL || b == NULL || dy == NULL || dy->grad == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < dy->size; ++i) {
+        const float g = dy->grad[flat_index(dy, i)];
+        accumulate(a, flat_index(a, i), g * b->data[flat_index(b, i)]);
+        accumulate(b, flat_index(b, i), g * a->data[flat_index(a, i)]);
+    }
+}
+
+static void scale_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *x = node->inputs[0];
+    const NC_Tensor *dy = node->output;
+    const NC_OpParams *p = (const NC_OpParams *)node->custom_params;
+    if (x == NULL || dy == NULL || dy->grad == NULL || p == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < x->size; ++i) {
+        accumulate(x, flat_index(x, i), p->scale * dy->grad[flat_index(dy, i)]);
+    }
+}
+
+static void softmax_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *x = node->inputs[0];
+    const NC_Tensor *y = node->output;
+    if (x == NULL || y == NULL || y->grad == NULL) {
+        return;
+    }
+    double dot = 0.0;
+    for (size_t i = 0; i < y->size; ++i) {
+        dot += (double)y->grad[flat_index(y, i)] * y->data[flat_index(y, i)];
+    }
+    for (size_t i = 0; i < x->size; ++i) {
+        const size_t yi = flat_index(y, i);
+        accumulate(x, flat_index(x, i),
+                   (float)(y->data[yi] * ((double)y->grad[yi] - dot)));
+    }
+}
+
 /* --------------------- Backward espacial (Marco 3) --------------------- */
 
 static void conv2d_backward(struct NC_TapeNode *node)
@@ -781,5 +829,81 @@ NC_Tensor *nc_nn_avg_pool2d(NC_Tape *tape, NC_Arena *scratch,
     p->stride = stride;
     nc_autograd_record(tape, (NC_Tensor *)input, NULL, out,
                        avgpool_backward, p);
+    return out;
+}
+
+NC_Tensor *nc_nn_mul(NC_Tape *tape, NC_Arena *scratch,
+                     const NC_Tensor *A, const NC_Tensor *B)
+{
+    if (tape == NULL || scratch == NULL || A == NULL || B == NULL ||
+        A->ndim != B->ndim || A->size != B->size) {
+        return NULL;
+    }
+    for (size_t i = 0; i < A->ndim; ++i) {
+        if (A->shape[i] != B->shape[i]) {
+            return NULL;
+        }
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, A->shape, A->ndim, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < A->size; ++i) {
+        out->data[i] = A->data[flat_index(A, i)] * B->data[flat_index(B, i)];
+    }
+    nc_autograd_record(tape, (NC_Tensor *)A, (NC_Tensor *)B, out,
+                       mul_backward, NULL);
+    return out;
+}
+
+NC_Tensor *nc_nn_scale(NC_Tape *tape, NC_Arena *scratch,
+                       const NC_Tensor *x, float scale)
+{
+    if (tape == NULL || scratch == NULL || x == NULL || x->ndim == 0 ||
+        x->ndim > 4) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, x->shape, x->ndim, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < x->size; ++i) {
+        out->data[i] = scale * x->data[flat_index(x, i)];
+    }
+    NC_OpParams *p = new_params(scratch, NC_OP_SCALE);
+    p->scale = scale;
+    nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, scale_backward, p);
+    return out;
+}
+
+NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
+                         const NC_Tensor *x)
+{
+    if (tape == NULL || scratch == NULL || x == NULL || x->size == 0 ||
+        x->ndim == 0 || x->ndim > 4) {
+        return NULL;
+    }
+    NC_Tensor *out = nc_tensor_create(scratch, x->shape, x->ndim, true);
+    if (out == NULL) {
+        return NULL;
+    }
+    float max_value = -INFINITY;
+    for (size_t i = 0; i < x->size; ++i) {
+        const float v = x->data[flat_index(x, i)];
+        if (v > max_value) max_value = v;
+    }
+    double sum = 0.0;
+    for (size_t i = 0; i < x->size; ++i) {
+        const double e = exp((double)x->data[flat_index(x, i)] - max_value);
+        out->data[i] = (float)e;
+        sum += e;
+    }
+    if (sum <= 0.0) {
+        return NULL;
+    }
+    for (size_t i = 0; i < out->size; ++i) {
+        out->data[i] = (float)((double)out->data[i] / sum);
+    }
+    nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, softmax_backward, NULL);
     return out;
 }

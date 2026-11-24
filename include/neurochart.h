@@ -20,6 +20,7 @@
 #include "nc_cells.h"
 #include "nc_topology.h"
 #include "nc_trainers.h"
+#include "nc_sequence.h"
 #include "nc_zoo.h"
 
 #endif /* NEUROCHART_H */

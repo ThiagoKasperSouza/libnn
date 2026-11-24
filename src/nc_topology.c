@@ -22,7 +22,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
                                                edge_capacity * sizeof(NC_Edge),
                                                alignof(NC_Edge));
     NC_AdamState *adam = (NC_AdamState *)nc_arena_alloc(
-        model_arena, cell_capacity * 2 * sizeof(NC_AdamState),
+        model_arena, cell_capacity * 16 * sizeof(NC_AdamState),
         alignof(NC_AdamState));
     NC_Tape *tape = nc_autograd_tape_init(model_arena, tape_capacity);
 
@@ -35,7 +35,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
     memset(graph, 0, sizeof(*graph));
     memset(cells, 0, cell_capacity * sizeof(NC_Cell));
     memset(edges, 0, edge_capacity * sizeof(NC_Edge));
-    memset(adam, 0, cell_capacity * 2 * sizeof(NC_AdamState));
+    memset(adam, 0, cell_capacity * 16 * sizeof(NC_AdamState));
 
     graph->model_arena = model_arena;
     graph->cells = cells;
@@ -43,7 +43,7 @@ NC_Graph *nc_graph_create(NC_Arena *model_arena, size_t cell_capacity,
     graph->edges = edges;
     graph->edge_capacity = edge_capacity;
     graph->adam = adam;
-    graph->adam_capacity = cell_capacity * 2;
+    graph->adam_capacity = cell_capacity * 16;
     graph->tape = tape;
     return graph;
 }
@@ -123,34 +123,16 @@ static bool graph_is_spatial(const NC_Graph *graph)
     return false;
 }
 
-NC_Tensor *nc_graph_forward(NC_Graph *graph, const NC_Tensor *input,
-                            NC_Arena *scratch)
+NC_Tensor *nc_graph_step(NC_Graph *graph, const NC_Tensor *input,
+                         NC_Arena *scratch)
 {
     if (graph == NULL || graph->tape == NULL || graph->cell_count == 0 ||
-        input == NULL || !nc_tensor_layout_valid(input)) {
-        return NULL;
-    }
-    nc_autograd_tape_reset(graph->tape);
-
-    NC_Tensor *input_view = NULL;
-    if (graph_is_spatial(graph)) {
-        /* Redes convolucionais preservam o tensor 4D; a conversão para 2D
-         * acontece somente quando uma célula densa o consome. */
-        if (input->ndim != 4) {
-            return NULL;
-        }
-        input_view = (NC_Tensor *)input;
-    } else {
-        /* requires_grad=true mantém o caminho de volta à saída do gerador
-         * quando um grafo é alimentado por outro (treino adversarial). */
-        input_view = nc_tensor_flatten(scratch, input, input->grad != NULL);
-    }
-    if (input_view == NULL) {
+        input == NULL || scratch == NULL || !nc_tensor_layout_valid(input)) {
         return NULL;
     }
 
     for (size_t i = 0; i < graph->cell_count; ++i) {
-        NC_Tensor *cell_input = gather_input(graph, i, input_view, scratch);
+        NC_Tensor *cell_input = gather_input(graph, i, input, scratch);
         if (cell_input == NULL) {
             return NULL;
         }
@@ -165,25 +147,73 @@ NC_Tensor *nc_graph_forward(NC_Graph *graph, const NC_Tensor *input,
     return graph->last_output;
 }
 
+NC_Tensor *nc_graph_forward(NC_Graph *graph, const NC_Tensor *input,
+                            NC_Arena *scratch)
+{
+    if (graph == NULL || graph->tape == NULL || input == NULL ||
+        !nc_tensor_layout_valid(input)) {
+        return NULL;
+    }
+    nc_autograd_tape_reset(graph->tape);
+
+    NC_Tensor *input_view = NULL;
+    if (graph_is_spatial(graph)) {
+        if (input->ndim != 4) {
+            return NULL;
+        }
+        input_view = (NC_Tensor *)input;
+    } else {
+        /* requires_grad=true mantém o caminho de volta à saída do gerador
+         * quando um grafo é alimentado por outro (treino adversarial). */
+        input_view = nc_tensor_flatten(scratch, input, input->grad != NULL);
+    }
+    if (input_view == NULL) {
+        return NULL;
+    }
+    return nc_graph_step(graph, input_view, scratch);
+}
+
+void nc_graph_zero_grads(NC_Graph *graph)
+{
+    if (graph == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < graph->cell_count; ++i) {
+        NC_Cell *cell = &graph->cells[i];
+        NC_Tensor *params[7] = {
+            cell->weights, cell->recurrent_weights, cell->bias,
+            cell->gate_weights[0], cell->gate_weights[1],
+            cell->gate_weights[2], cell->gate_weights[3]
+        };
+        for (size_t p = 0; p < 7; ++p) {
+            if (params[p] != NULL && params[p]->grad != NULL) {
+                memset(params[p]->grad, 0, params[p]->size * sizeof(float));
+            }
+        }
+        for (size_t g = 0; g < 4; ++g) {
+            if (cell->gate_recurrent[g] != NULL &&
+                cell->gate_recurrent[g]->grad != NULL) {
+                memset(cell->gate_recurrent[g]->grad, 0,
+                       cell->gate_recurrent[g]->size * sizeof(float));
+            }
+            if (cell->gate_bias[g] != NULL && cell->gate_bias[g]->grad != NULL) {
+                memset(cell->gate_bias[g]->grad, 0,
+                       cell->gate_bias[g]->size * sizeof(float));
+            }
+        }
+        if (cell->activity != NULL && cell->activity->grad != NULL) {
+            memset(cell->activity->grad, 0, cell->activity->size * sizeof(float));
+        }
+    }
+}
+
 static void graph_backward_impl(NC_Graph *graph, bool zero_grads)
 {
     if (graph == NULL || graph->tape == NULL) {
         return;
     }
-
     if (zero_grads) {
-        for (size_t i = 0; i < graph->cell_count; ++i) {
-            NC_Cell *cell = &graph->cells[i];
-            if (cell->weights != NULL && cell->weights->grad != NULL) {
-                memset(cell->weights->grad, 0, cell->weights->size * sizeof(float));
-            }
-            if (cell->bias != NULL && cell->bias->grad != NULL) {
-                memset(cell->bias->grad, 0, cell->bias->size * sizeof(float));
-            }
-            if (cell->activity != NULL && cell->activity->grad != NULL) {
-                memset(cell->activity->grad, 0, cell->activity->size * sizeof(float));
-            }
-        }
+        nc_graph_zero_grads(graph);
     }
     /* Regularização L1 (SAE): semeia o gradiente da ativação oculta. */
     if (graph->sparse_cell != NULL && graph->sparse_cell->activity != NULL &&
@@ -216,8 +246,16 @@ void nc_graph_ensure_adam_states(NC_Graph *graph)
     }
     for (size_t i = 0; i < graph->cell_count; ++i) {
         NC_Cell *cell = &graph->cells[i];
-        NC_Tensor *params[2] = { cell->weights, cell->bias };
-        for (size_t p = 0; p < 2; ++p) {
+        NC_Tensor *params[15] = {
+            cell->weights, cell->recurrent_weights, cell->bias,
+            cell->gate_weights[0], cell->gate_weights[1],
+            cell->gate_weights[2], cell->gate_weights[3],
+            cell->gate_recurrent[0], cell->gate_recurrent[1],
+            cell->gate_recurrent[2], cell->gate_recurrent[3],
+            cell->gate_bias[0], cell->gate_bias[1],
+            cell->gate_bias[2], cell->gate_bias[3]
+        };
+        for (size_t p = 0; p < 15; ++p) {
             NC_Tensor *param = params[p];
             if (param == NULL || !param->requires_grad ||
                 graph->adam_count >= graph->adam_capacity) {

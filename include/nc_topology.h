@@ -71,6 +71,14 @@ void nc_graph_backward(NC_Graph *graph);
  * semeado por outro grafo (treino adversarial do gerador). */
 void nc_graph_backward_no_zero(NC_Graph *graph);
 
+/* Zera apenas os gradientes acumulados (útil antes de um BPTT completo). */
+void nc_graph_zero_grads(NC_Graph *graph);
+
+/* Executa um único passo temporal sem resetar a fita. A entrada já deve
+ * estar no formato esperado: 2D para grafos densos, 4D para convolucionais. */
+NC_Tensor *nc_graph_step(NC_Graph *graph, const NC_Tensor *input,
+                         NC_Arena *scratch);
+
 /* Cria os estados Adam para os parâmetros treináveis (idempotente). */
 void nc_graph_ensure_adam_states(NC_Graph *graph);
 

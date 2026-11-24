@@ -20,7 +20,10 @@ typedef enum {
     NC_OP_CONV2D,
     NC_OP_CONV_TRANSPOSE,
     NC_OP_MAXPOOL,
-    NC_OP_AVGPOOL
+    NC_OP_AVGPOOL,
+    NC_OP_MUL,
+    NC_OP_SCALE,
+    NC_OP_SOFTMAX
 } NC_OpType;
 
 struct NC_TapeNode;
@@ -82,6 +85,12 @@ NC_Tensor *nc_nn_activation(NC_Tape *tape, NC_Arena *scratch,
                             const NC_Tensor *x, NC_OpType op);
 NC_Tensor *nc_nn_dropout(NC_Tape *tape, NC_Arena *scratch,
                          const NC_Tensor *x, float keep_prob);
+NC_Tensor *nc_nn_mul(NC_Tape *tape, NC_Arena *scratch,
+                     const NC_Tensor *A, const NC_Tensor *B);
+NC_Tensor *nc_nn_scale(NC_Tape *tape, NC_Arena *scratch,
+                       const NC_Tensor *x, float scale);
+NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
+                         const NC_Tensor *x);
 
 /* Identidade diferenciável para qualquer ndim (1–4). */
 NC_Tensor *nc_nn_identity(NC_Tape *tape, NC_Arena *scratch,
