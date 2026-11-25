@@ -385,3 +385,204 @@ NC_Graph *nc_zoo_create_ntm(NC_Arena *model, size_t input_dim, size_t slots,
     return nc_graph_connect(g, 0, 1, NC_EDGE_RECURRENT) &&
            nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD) ? g : NULL;
 }
+
+/* ------------------------- Topologias do Marco 5 ----------------------- */
+
+static NC_Graph *simple_chain(NC_Arena *model, NC_CellType hidden_type,
+                              size_t in_dim, size_t hidden_dim, size_t out_dim)
+{
+    (void)in_dim; /* pesos da célula oculta são inicializados pelo chamador */
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) return NULL;
+    NC_Cell *in = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *hidden = nc_graph_add_cell(g, hidden_type, NC_ACT_LINEAR);
+    NC_Cell *out = add_layer(g, NC_CELL_OUTPUT, NC_ACT_LINEAR, hidden_dim, out_dim);
+    if (in == NULL || hidden == NULL || out == NULL ||
+        !nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) ||
+        !nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)) return NULL;
+    return g;
+}
+
+static bool init_cd_cell(NC_Cell *cell, NC_Arena *model, size_t visible,
+                         size_t hidden)
+{
+    if (!nc_cell_init_params(cell, model, visible, hidden, true)) return false;
+    const size_t vb_shape[2] = { 1, visible };
+    cell->recurrent_weights = nc_tensor_create(model, vb_shape, 2, true);
+    if (cell->recurrent_weights == NULL) return false;
+    nc_tensor_fill_zeros(cell->recurrent_weights);
+    return true;
+}
+
+NC_Graph *nc_zoo_create_markov_chain(NC_Arena *model, size_t states, size_t hidden)
+{
+    NC_Graph *g = simple_chain(model, NC_CELL_PROBABILISTIC_HIDDEN,
+                               states, hidden, states);
+    if (g != NULL && !init_cd_cell(&g->cells[1], model, states, hidden)) return NULL;
+    return g;
+}
+
+NC_Graph *nc_zoo_create_hopfield(NC_Arena *model, size_t dim)
+{
+    if (dim == 0) return NULL;
+    NC_Graph *g = new_graph(model, 2, 1);
+    if (g == NULL) return NULL;
+    NC_Cell *in = nc_graph_add_cell(g, NC_CELL_BACKFED_INPUT, NC_ACT_TANH);
+    NC_Cell *out = nc_graph_add_cell(g, NC_CELL_MATCH_INPUT_OUTPUT, NC_ACT_LINEAR);
+    if (in == NULL || out == NULL ||
+        !nc_cell_init_params(in, model, dim, dim, false) ||
+        !nc_graph_connect(g, 0, 1, NC_EDGE_BIDIRECTIONAL)) return NULL;
+    nc_tensor_fill_random_normal(in->weights, 0.0f, 0.1f);
+    return g;
+}
+
+NC_Graph *nc_zoo_create_boltzmann(NC_Arena *model, size_t visible, size_t hidden)
+{
+    NC_Graph *g = simple_chain(model, NC_CELL_PROBABILISTIC_HIDDEN,
+                               visible, hidden, visible);
+    if (g != NULL && !init_cd_cell(&g->cells[1], model, visible, hidden)) return NULL;
+    return g;
+}
+
+NC_Graph *nc_zoo_create_rbm(NC_Arena *model, size_t visible, size_t hidden)
+{
+    return nc_zoo_create_boltzmann(model, visible, hidden);
+}
+
+NC_Graph *nc_zoo_create_dbn(NC_Arena *model, size_t visible,
+                            const size_t hidden_dims[], size_t layers)
+{
+    if (hidden_dims == NULL || layers == 0) return NULL;
+    NC_Graph *g = new_graph(model, layers + 2, layers + 1);
+    if (g == NULL) return NULL;
+    if (nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR) == NULL) return NULL;
+    size_t current = visible;
+    for (size_t i = 0; i < layers; ++i) {
+        NC_Cell *h = nc_graph_add_cell(g, NC_CELL_PROBABILISTIC_HIDDEN, NC_ACT_LINEAR);
+        if (h == NULL || !init_cd_cell(h, model, current, hidden_dims[i]) ||
+            !nc_graph_connect(g, i, i + 1, NC_EDGE_FORWARD)) return NULL;
+        current = hidden_dims[i];
+    }
+    NC_Cell *out = add_layer(g, NC_CELL_OUTPUT, NC_ACT_LINEAR, current, visible);
+    return (out != NULL && nc_graph_connect(g, layers, layers + 1, NC_EDGE_FORWARD))
+        ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_vae(NC_Arena *model, size_t input_dim, size_t latent_dim)
+{
+    NC_Graph *g = nc_zoo_create_ae(model, input_dim, latent_dim);
+    if (g == NULL) return NULL;
+    NC_Cell *latent = &g->cells[1];
+    const size_t ws[2] = { input_dim, latent_dim };
+    latent->gate_weights[0] = nc_tensor_create(model, ws, 2, true);
+    latent->gate_weights[1] = nc_tensor_create(model, ws, 2, true);
+    latent->gate_bias[0] = nc_tensor_create(model, (size_t[2]){1, latent_dim}, 2, true);
+    latent->gate_bias[1] = nc_tensor_create(model, (size_t[2]){1, latent_dim}, 2, true);
+    if (latent->gate_weights[0] == NULL || latent->gate_weights[1] == NULL ||
+        latent->gate_bias[0] == NULL || latent->gate_bias[1] == NULL) return NULL;
+    const float std = sqrtf(2.0f / (float)(input_dim + latent_dim));
+    nc_tensor_fill_random_normal(latent->gate_weights[0], 0.0f, std);
+    nc_tensor_fill_random_normal(latent->gate_weights[1], 0.0f, std);
+    return g;
+}
+
+static NC_Graph *create_reservoir(NC_Arena *model, NC_CellType reservoir_type,
+                                   size_t input_dim, size_t neurons,
+                                   size_t output_dim, bool spiking)
+{
+    if (input_dim == 0 || neurons == 0 || output_dim == 0) return NULL;
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) return NULL;
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *res = nc_graph_add_cell(g, reservoir_type, NC_ACT_LINEAR);
+    NC_Cell *out = nc_graph_add_cell(g, NC_CELL_OUTPUT, NC_ACT_LINEAR);
+    if (input == NULL || res == NULL || out == NULL) return NULL;
+    const size_t ws[2] = { input_dim, neurons };
+    res->weights = nc_tensor_create(model, ws, 2, false);
+    out->weights = nc_tensor_create(model, (size_t[2]){ neurons, output_dim }, 2, false);
+    if (res->weights == NULL || out->weights == NULL) return NULL;
+    nc_tensor_fill_random_normal(res->weights, 0.0f,
+                                 sqrtf(1.0f / (float)input_dim));
+    nc_tensor_fill_zeros(out->weights);
+    if (spiking) {
+        res->state.spiking.v_threshold = 0.3f;
+        res->state.spiking.v_reset = 0.0f;
+        res->state.spiking.decay_rate = 0.9f;
+        res->state.spiking.refractory_steps = 1;
+    }
+    return (nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) &&
+            nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)) ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_lsm(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim)
+{
+    return create_reservoir(model, NC_CELL_SPIKING_HIDDEN, input_dim,
+                            neurons, output_dim, true);
+}
+
+NC_Graph *nc_zoo_create_elm(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim)
+{
+    return create_reservoir(model, NC_CELL_HIDDEN, input_dim, neurons,
+                            output_dim, false);
+}
+
+NC_Graph *nc_zoo_create_esn(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim)
+{
+    NC_Graph *g = create_reservoir(model, NC_CELL_RECURRENT, input_dim,
+                                   neurons, output_dim, false);
+    if (g == NULL) return NULL;
+    const size_t rs[2] = { neurons, neurons };
+    g->cells[1].recurrent_weights = nc_tensor_create(model, rs, 2, false);
+    if (g->cells[1].recurrent_weights == NULL) return NULL;
+    nc_tensor_fill_random_normal(g->cells[1].recurrent_weights, 0.0f, 0.1f);
+    return g;
+}
+
+NC_Graph *nc_zoo_create_kohonen(NC_Arena *model, size_t input_dim, size_t neurons)
+{
+    if (input_dim == 0 || neurons == 0) return NULL;
+    NC_Graph *g = new_graph(model, 2, 1);
+    if (g == NULL) return NULL;
+    nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *map = nc_graph_add_cell(g, NC_CELL_HIDDEN, NC_ACT_LINEAR);
+    if (map == NULL) return NULL;
+    map->competitive = true;
+    map->weights = nc_tensor_create(model, (size_t[2]){ neurons, input_dim }, 2, true);
+    if (map->weights == NULL) return NULL;
+    nc_tensor_fill_random_normal(map->weights, 0.0f, 0.1f);
+    return nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_rbf(NC_Arena *model, size_t input_dim, size_t centers,
+                            size_t output_dim)
+{
+    if (input_dim == 0 || centers == 0 || output_dim == 0) return NULL;
+    NC_Graph *g = new_graph(model, 3, 2);
+    if (g == NULL) return NULL;
+    nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *kernel = nc_graph_add_cell(g, NC_CELL_KERNEL, NC_ACT_LINEAR);
+    NC_Cell *out = nc_graph_add_cell(g, NC_CELL_OUTPUT, NC_ACT_LINEAR);
+    if (kernel == NULL || out == NULL) return NULL;
+    kernel->weights = nc_tensor_create(model, (size_t[2]){ centers, input_dim }, 2, false);
+    out->weights = nc_tensor_create(model, (size_t[2]){ centers, output_dim }, 2, false);
+    if (kernel->weights == NULL || out->weights == NULL) return NULL;
+    nc_tensor_fill_random_normal(kernel->weights, 0.0f, 1.0f);
+    nc_tensor_fill_zeros(out->weights);
+    return (nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) &&
+            nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)) ? g : NULL;
+}
+
+NC_Graph *nc_zoo_create_svm(NC_Arena *model, size_t input_dim)
+{
+    if (input_dim == 0) return NULL;
+    NC_Graph *g = new_graph(model, 2, 1);
+    if (g == NULL) return NULL;
+    nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *out = nc_graph_add_cell(g, NC_CELL_OUTPUT, NC_ACT_LINEAR);
+    if (out == NULL || !nc_cell_init_params(out, model, input_dim, 1, true)) return NULL;
+    nc_tensor_fill_zeros(out->weights);
+    return nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) ? g : NULL;
+}

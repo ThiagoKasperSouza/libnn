@@ -2,7 +2,7 @@
 
 SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdlib`, `math`, `string`, `stdint`, `stddef`, `stdbool`). A arquitetura completa e o roadmap estão em [`Plano de Arquitetura_ SDK de Redes Neurais em C Puro (Zero Dependências).md`](./Plano%20de%20Arquitetura_%20SDK%20de%20Redes%20Neurais%20em%20C%20Puro%20%28Zero%20Depend%C3%AAncias%29.md).
 
-**Status:** Marcos 1 a 4 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md), [`docs/MARCO2.md`](./docs/MARCO2.md), [`docs/MARCO3.md`](./docs/MARCO3.md) e [`docs/MARCO4.md`](./docs/MARCO4.md).
+**Status:** Marcos 1 a 5 implementados. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md) a [`docs/MARCO5.md`](./docs/MARCO5.md).
 
 ## Marcos
 
@@ -12,7 +12,7 @@ SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdli
 | 2 | Tape de autograd, Adam, P/FF/DFF/AE/DAE/SAE/DRN | ✅ implementado |
 | 3 | `im2col` + GEMM, conv transposta, pooling, DCN/DN/DCIGN/GAN | ✅ implementado |
 | 4 | Unrolling temporal, BPTT, RNN/LSTM/GRU/NTM | ✅ implementado |
-| 5 | Energia, spiking e reservatórios | ⏳ |
+| 5 | Energia, spiking e reservatórios | ✅ implementado |
 | 6 | Renderizador SVG e certificação | ⏳ |
 
 ## Build e testes
@@ -54,7 +54,11 @@ libnn/
 │       ├── image-classifier/
 │       ├── gan-toy/
 │       ├── sequence-copy/
-│       └── ntm-memory/
+│       ├── ntm-memory/
+│       ├── hopfield-memory/
+│       ├── rbm-cd/
+│       ├── reservoir-predictor/
+│       └── kohonen-map/
 ├── tests/
 │   ├── test_common.h
 │   ├── test_arena.c
@@ -67,7 +71,8 @@ libnn/
 │   ├── MARCO1.md
 │   ├── MARCO2.md
 │   ├── MARCO3.md
-│   └── MARCO4.md
+│   ├── MARCO4.md
+│   └── MARCO5.md
 ├── Makefile
 └── README.md
 ```
@@ -178,9 +183,20 @@ Exemplos completos: o índice em [`examples/README.md`](./examples/README.md) li
 | `nc_cell_init_gated_params` | Pesos de entrada/recorrência/viés por porte |
 | `nc_zoo_create_{rnn,lstm,gru,ntm}` | Fábricas recorrentes |
 
+## API do Marco 5
+
+| Função | Contrato |
+| :-- | :-- |
+| `nc_train_contrastive_divergence` | CD-k para RBM/BM/Hopfield estocástico |
+| `nc_train_hebbian_step / nc_train_stdp_step` | Aprendizado Hebbiano e STDP para LIF |
+| `nc_train_reservoir_ridge_regression` | Pseudoinversa ridge para ELM/ESN/LSM/RBF |
+| `nc_train_kohonen_bmu_step` | Atualização competitiva do BMU |
+| `nc_train_kernel_hinge_loss` | Hinge loss linear (SVM) |
+| `nc_zoo_create_{markov_chain,hopfield,boltzmann,rbm,dbn,vae,lsm,elm,esn,kohonen,rbf,svm}` | Fábricas de energia/reservatório |
+
 ## Validação
 
-`make test` cobre seis binários: arena/tensores (Marco 1), gradientes analíticos, estrutura das 7 topologias feedforward, treino de XOR e reconstrução AE/DAE/SAE/DRN (Marco 2), im2col vs. convolução direta e gradientes espaciais com `N>1, C_in>1` (Marco 3) e, no Marco 4, BPTT verificado por diferenças finitas em `W_xh`/`W_hh`, forward/backward de RNN/LSTM/GRU/NTM e treino de GRU em cópia com atraso. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
+`make test` cobre sete binários: arena/tensores (Marco 1), gradientes analíticos, topologias feedforward (Marco 2), operações espaciais e GAN (Marco 3), BPTT e RNN/LSTM/GRU/NTM (Marco 4) e, no Marco 5, CD-k, Hebb/Hopfield, STDP/LIF, ridge (ELM/RBF), BMU e hinge loss — incluindo os 12 construtores. `make asan` repete tudo com ASan/UBSan e detecção de vazamentos.
 
 ## Limitações conhecidas
 

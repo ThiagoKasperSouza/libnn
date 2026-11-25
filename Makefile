@@ -16,7 +16,7 @@ HDRS := $(wildcard include/*.h)
 LIB  := libnn.a
 
 TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo \
-         tests/test_spatial tests/test_sequence
+         tests/test_spatial tests/test_sequence tests/test_energy
 SAN_TESTS := $(TESTS:tests/%=tests/%_asan)
 EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/xor-classifier/xor-classifier \
@@ -24,7 +24,11 @@ EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/image-classifier/image-classifier \
             examples/apps/gan-toy/gan-toy \
             examples/apps/sequence-copy/sequence-copy \
-            examples/apps/ntm-memory/ntm-memory
+            examples/apps/ntm-memory/ntm-memory \
+            examples/apps/hopfield-memory/hopfield-memory \
+            examples/apps/rbm-cd/rbm-cd \
+            examples/apps/reservoir-predictor/reservoir-predictor \
+            examples/apps/kohonen-map/kohonen-map
 
 .PHONY: all lib tests test asan valgrind examples apps run_example run_examples run_apps clean
 
@@ -57,6 +61,14 @@ examples/apps/gan-toy/gan-toy: examples/apps/gan-toy/main.c $(LIB) $(HDRS)
 examples/apps/sequence-copy/sequence-copy: examples/apps/sequence-copy/main.c $(LIB) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
 examples/apps/ntm-memory/ntm-memory: examples/apps/ntm-memory/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/hopfield-memory/hopfield-memory: examples/apps/hopfield-memory/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/rbm-cd/rbm-cd: examples/apps/rbm-cd/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/reservoir-predictor/reservoir-predictor: examples/apps/reservoir-predictor/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/kohonen-map/kohonen-map: examples/apps/kohonen-map/main.c $(LIB) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
 
 examples apps: $(EXAMPLES)

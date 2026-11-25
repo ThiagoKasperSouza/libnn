@@ -11,6 +11,10 @@ Cada aplicação vive na sua própria pasta, com `main.c` e um `README.md` que e
 | [`gan-toy`](./apps/gan-toy/README.md) | 3 | GAN mínima com treino adversarial alternado |
 | [`sequence-copy`](./apps/sequence-copy/README.md) | 4 | LSTM com BPTT numa tarefa de cópia com atraso |
 | [`ntm-memory`](./apps/ntm-memory/README.md) | 4 | Memória externa endereçável por conteúdo |
+| [`hopfield-memory`](./apps/hopfield-memory/README.md) | 5 | Memória associativa com regra Hebbiana |
+| [`rbm-cd`](./apps/rbm-cd/README.md) | 5 | RBM treinada com divergência contrastiva CD-k |
+| [`reservoir-predictor`](./apps/reservoir-predictor/README.md) | 5 | ELM com regressão ridge/pseudoinversa |
+| [`kohonen-map`](./apps/kohonen-map/README.md) | 5 | Mapa auto-organizável com BMU |
 
 ## Como compilar e executar
 

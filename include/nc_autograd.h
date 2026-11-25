@@ -24,7 +24,8 @@ typedef enum {
     NC_OP_MUL,
     NC_OP_SCALE,
     NC_OP_SOFTMAX,
-    NC_OP_TRANSPOSE
+    NC_OP_TRANSPOSE,
+    NC_OP_EXP
 } NC_OpType;
 
 struct NC_TapeNode;
@@ -96,6 +97,8 @@ NC_Tensor *nc_nn_scale(NC_Tape *tape, NC_Arena *scratch,
                        const NC_Tensor *x, float scale);
 NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
                          const NC_Tensor *x);
+
+NC_Tensor *nc_nn_exp(NC_Tape *tape, NC_Arena *scratch, const NC_Tensor *x);
 
 /* Transposta 2D diferenciável (view 2D com gradiente próprio). */
 NC_Tensor *nc_nn_transpose(NC_Tape *tape, NC_Arena *scratch,

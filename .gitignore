@@ -14,6 +14,8 @@ tests/test_spatial
 tests/test_spatial_asan
 tests/test_sequence
 tests/test_sequence_asan
+tests/test_energy
+tests/test_energy_asan
 examples/apps/tensor-basics/tensor-basics
 examples/apps/xor-classifier/xor-classifier
 examples/apps/denoising-autoencoder/denoising-autoencoder
@@ -21,3 +23,7 @@ examples/apps/image-classifier/image-classifier
 examples/apps/gan-toy/gan-toy
 examples/apps/sequence-copy/sequence-copy
 examples/apps/ntm-memory/ntm-memory
+examples/apps/hopfield-memory/hopfield-memory
+examples/apps/rbm-cd/rbm-cd
+examples/apps/reservoir-predictor/reservoir-predictor
+examples/apps/kohonen-map/kohonen-map

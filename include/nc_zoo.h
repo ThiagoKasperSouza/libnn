@@ -53,4 +53,24 @@ NC_Graph *nc_zoo_create_gru(NC_Arena *model, size_t input_dim,
 NC_Graph *nc_zoo_create_ntm(NC_Arena *model, size_t input_dim, size_t slots,
                             size_t mem_dim, size_t output_dim);
 
+/* ------------------------- Topologias do Marco 5 ----------------------- */
+
+NC_Graph *nc_zoo_create_markov_chain(NC_Arena *model, size_t states, size_t hidden);
+NC_Graph *nc_zoo_create_hopfield(NC_Arena *model, size_t dim);
+NC_Graph *nc_zoo_create_boltzmann(NC_Arena *model, size_t visible, size_t hidden);
+NC_Graph *nc_zoo_create_rbm(NC_Arena *model, size_t visible, size_t hidden);
+NC_Graph *nc_zoo_create_dbn(NC_Arena *model, size_t visible,
+                            const size_t hidden_dims[], size_t layers);
+NC_Graph *nc_zoo_create_vae(NC_Arena *model, size_t input_dim, size_t latent_dim);
+NC_Graph *nc_zoo_create_lsm(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim);
+NC_Graph *nc_zoo_create_elm(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim);
+NC_Graph *nc_zoo_create_esn(NC_Arena *model, size_t input_dim, size_t neurons,
+                            size_t output_dim);
+NC_Graph *nc_zoo_create_kohonen(NC_Arena *model, size_t input_dim, size_t neurons);
+NC_Graph *nc_zoo_create_rbf(NC_Arena *model, size_t input_dim, size_t centers,
+                            size_t output_dim);
+NC_Graph *nc_zoo_create_svm(NC_Arena *model, size_t input_dim);
+
 #endif /* NC_ZOO_H */

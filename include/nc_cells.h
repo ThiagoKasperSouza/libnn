@@ -45,6 +45,9 @@ typedef struct {
     float decay_rate;
     size_t refractory_steps;
     size_t current_refractory;
+    float last_pre_time;
+    float last_post_time;
+    float *membrane; /* potentials por neurônio, alocados na scratch */
 } NC_CellSpikingState;
 
 typedef struct {
@@ -92,6 +95,7 @@ typedef struct NC_Cell {
     NC_Tensor *activity;
     NC_Activation activation;
     size_t memory_slots; /* NTM: linhas do banco de memória */
+    bool competitive;    /* Kohonen: pesos são protótipos, não matriz de projeção */
 
     /* Porte separados: [0..gates-1] = entrada, recorrrente e viés. */
     NC_Tensor *gate_weights[4];

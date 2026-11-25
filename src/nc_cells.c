@@ -386,6 +386,102 @@ static NC_Tensor *ntm_forward(NC_Cell *cell, const NC_Tensor *input,
     return read;
 }
 
+static NC_Tensor *probabilistic_forward(NC_Cell *cell, const NC_Tensor *input,
+                                        NC_Tape *tape, NC_Arena *scratch)
+{
+    /* Sem pesos de reconstrução, mantém o comportamento determinístico
+     * usado pelo DCIGN (mu = x). */
+    if (cell->gate_weights[0] == NULL || cell->gate_weights[1] == NULL) {
+        return nc_nn_identity(tape, scratch, input);
+    }
+    NC_Tensor *mu = nc_nn_matmul(tape, scratch, input, cell->gate_weights[0]);
+    if (cell->gate_bias[0] != NULL) {
+        mu = nc_nn_add(tape, scratch, mu, cell->gate_bias[0]);
+    }
+    NC_Tensor *logvar = nc_nn_matmul(tape, scratch, input, cell->gate_weights[1]);
+    if (cell->gate_bias[1] != NULL) {
+        logvar = nc_nn_add(tape, scratch, logvar, cell->gate_bias[1]);
+    }
+    NC_Tensor *half = nc_nn_scale(tape, scratch, logvar, 0.5f);
+    NC_Tensor *sigma = nc_nn_exp(tape, scratch, half);
+    NC_Tensor *eps = nc_tensor_create(scratch, input->shape, input->ndim, false);
+    if (mu == NULL || sigma == NULL || eps == NULL) {
+        return NULL;
+    }
+    nc_tensor_fill_random_normal(eps, 0.0f, 1.0f);
+    NC_Tensor *noise = nc_nn_mul(tape, scratch, sigma, eps);
+    NC_Tensor *z = nc_nn_add(tape, scratch, mu, noise);
+    cell->state.probabilistic.mu = mu;
+    cell->state.probabilistic.log_var = logvar;
+    cell->state.probabilistic.eps = eps;
+    return z;
+}
+
+static NC_Tensor *spiking_forward(NC_Cell *cell, const NC_Tensor *input,
+                                  NC_Tape *tape, NC_Arena *scratch)
+{
+    (void)tape; /* LIF não é diferenciável: usa STDP/Hebbian */
+    if (cell->weights == NULL || input->ndim != 2) return NULL;
+    const size_t hidden = cell->weights->shape[1];
+    const size_t n = input->shape[0];
+    if (cell->state.spiking.membrane == NULL) {
+        cell->state.spiking.membrane =
+            (float *)nc_arena_alloc(scratch, hidden * sizeof(float),
+                                    NC_TENSOR_ALIGNMENT);
+        if (cell->state.spiking.membrane == NULL) return NULL;
+        memset(cell->state.spiking.membrane, 0, hidden * sizeof(float));
+    }
+    const size_t shape[2] = { n, hidden };
+    NC_Tensor *out = nc_tensor_create(scratch, shape, 2, false);
+    if (out == NULL) return NULL;
+
+    for (size_t sample = 0; sample < n; ++sample) {
+        for (size_t h = 0; h < hidden; ++h) {
+            float sum = 0.0f;
+            for (size_t a = 0; a < input->shape[1]; ++a) {
+                sum += input->data[sample * input->strides[0] + a] *
+                       cell->weights->data[a * hidden + h];
+            }
+            float v = cell->state.spiking.decay_rate *
+                      cell->state.spiking.membrane[h] + sum;
+            float spike = 0.0f;
+            if (cell->state.spiking.current_refractory > 0) {
+                --cell->state.spiking.current_refractory;
+                v = cell->state.spiking.v_reset;
+            } else if (v >= cell->state.spiking.v_threshold) {
+                spike = 1.0f;
+                v = cell->state.spiking.v_reset;
+                cell->state.spiking.current_refractory =
+                    cell->state.spiking.refractory_steps;
+                cell->state.spiking.last_post_time += 1.0f;
+            }
+            cell->state.spiking.membrane[h] = v;
+            out->data[sample * hidden + h] = spike;
+        }
+    }
+    return out;
+}
+
+static NC_Tensor *backfed_forward(NC_Cell *cell, const NC_Tensor *input,
+                                  NC_Tape *tape, NC_Arena *scratch)
+{
+    if (cell->weights == NULL) return NULL;
+    NC_Tensor *z = (NC_Tensor *)input;
+    if (cell->recurrent_weights != NULL) {
+        const size_t hidden = cell->weights->shape[1];
+        NC_Tensor *h_prev = ensure_state(scratch, &cell->state.recurrent.hidden,
+                                         input->shape[0], hidden);
+        if (h_prev == NULL) return NULL;
+        NC_Tensor *feedback =
+            nc_nn_matmul(tape, scratch, h_prev, cell->recurrent_weights);
+        z = nc_nn_add(tape, scratch, z, feedback);
+    }
+    NC_Tensor *out = nc_nn_matmul(tape, scratch, z, cell->weights);
+    if (cell->bias != NULL) out = nc_nn_add(tape, scratch, out, cell->bias);
+    cell->activity = nc_nn_activation(tape, scratch, out, NC_OP_TANH);
+    return cell->activity;
+}
+
 NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
                            NC_Tape *tape, NC_Arena *scratch)
 {
@@ -409,6 +505,12 @@ NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
         /* Com pesos, comporta-se como uma camada densa (AE/DAE). */
         /* fallthrough */
     case NC_CELL_HIDDEN:
+        if (cell->competitive) {
+            /* Kohonen: os pesos são protótipos, atualizados pelo BMU. */
+            cell->activity = nc_nn_identity(tape, scratch, input);
+            return cell->activity;
+        }
+        /* fallthrough */
     case NC_CELL_OUTPUT: {
         const NC_Tensor *dense_input = input;
         if (input->ndim == 4) {
@@ -429,9 +531,29 @@ NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
         return cell->activity;
     }
     case NC_CELL_KERNEL:
-        if (cell->weights == NULL || input->ndim != 4) {
-            return NULL;
+        if (cell->weights == NULL) return NULL;
+        if (input->ndim == 2 && cell->weights->ndim == 2) {
+            /* RBF: centros nas linhas de weights, features = exp(-||x-c||²). */
+            const size_t centers = cell->weights->shape[0];
+            const size_t dim = cell->weights->shape[1];
+            const size_t shape[2] = { input->shape[0], centers };
+            NC_Tensor *features = nc_tensor_create(scratch, shape, 2, false);
+            if (features == NULL) return NULL;
+            for (size_t n = 0; n < shape[0]; ++n) {
+                for (size_t c = 0; c < centers; ++c) {
+                    double dist2 = 0.0;
+                    for (size_t j = 0; j < dim; ++j) {
+                        const double d = input->data[n * input->strides[0] + j] -
+                                         cell->weights->data[c * dim + j];
+                        dist2 += d * d;
+                    }
+                    features->data[n * centers + c] = (float)exp(-dist2);
+                }
+            }
+            cell->activity = features;
+            return cell->activity;
         }
+        if (input->ndim != 4) return NULL;
         cell->activity = nc_nn_conv2d(tape, scratch, input, cell->weights,
                                       cell->state.conv.stride,
                                       cell->state.conv.padding);
@@ -460,24 +582,15 @@ NC_Tensor *nc_cell_forward(NC_Cell *cell, const NC_Tensor *input,
             return NULL;
         }
         return cell->activity;
-    case NC_CELL_PROBABILISTIC_HIDDEN: {
-        /* Latente determinístico neste marco: mu = x. Amostragem e KL (VAE)
-         * pertencem ao Marco 5; os tensores de estado já são reservados. */
-        if (cell->state.probabilistic.mu == NULL) {
-            const size_t shape[4] = { input->shape[0], input->shape[1],
-                                      input->shape[2] ? input->shape[2] : 1,
-                                      input->shape[3] ? input->shape[3] : 1 };
-            const size_t ndim = input->ndim;
-            cell->state.probabilistic.mu =
-                nc_tensor_create(scratch, shape, ndim, false);
-            cell->state.probabilistic.log_var =
-                nc_tensor_create(scratch, shape, ndim, false);
-            cell->state.probabilistic.eps =
-                nc_tensor_create(scratch, shape, ndim, false);
-        }
-        cell->activity = nc_nn_identity(tape, scratch, input);
+    case NC_CELL_PROBABILISTIC_HIDDEN:
+        cell->activity = probabilistic_forward(cell, input, tape, scratch);
         return cell->activity;
-    }
+    case NC_CELL_SPIKING_HIDDEN:
+        cell->activity = spiking_forward(cell, input, tape, scratch);
+        return cell->activity;
+    case NC_CELL_BACKFED_INPUT:
+        cell->activity = backfed_forward(cell, input, tape, scratch);
+        return cell->activity;
     case NC_CELL_RECURRENT:
         cell->activity = rnn_forward(cell, input, tape, scratch);
         return cell->activity;

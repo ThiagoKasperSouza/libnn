@@ -105,7 +105,8 @@ static NC_Tensor *gather_input(NC_Graph *graph, size_t cell_id,
 
     if (acc == NULL) {
         const NC_CellType type = graph->cells[cell_id].type;
-        if (type == NC_CELL_INPUT || type == NC_CELL_NOISY_INPUT) {
+        if (type == NC_CELL_INPUT || type == NC_CELL_NOISY_INPUT ||
+            type == NC_CELL_BACKFED_INPUT) {
             acc = (NC_Tensor *)flat;
         }
     }
@@ -116,7 +117,9 @@ static bool graph_is_spatial(const NC_Graph *graph)
 {
     for (size_t i = 0; i < graph->cell_count; ++i) {
         const NC_CellType type = graph->cells[i].type;
-        if (type == NC_CELL_KERNEL || type == NC_CELL_CONV_OR_POOL) {
+        const NC_Tensor *w = graph->cells[i].weights;
+        const bool conv_kernel = type == NC_CELL_KERNEL && w != NULL && w->ndim == 4;
+        if (conv_kernel || type == NC_CELL_CONV_OR_POOL) {
             return true;
         }
     }
@@ -131,6 +134,7 @@ NC_Tensor *nc_graph_step(NC_Graph *graph, const NC_Tensor *input,
         return NULL;
     }
 
+    graph->last_input = (NC_Tensor *)input;
     for (size_t i = 0; i < graph->cell_count; ++i) {
         NC_Tensor *cell_input = gather_input(graph, i, input, scratch);
         if (cell_input == NULL) {
@@ -321,6 +325,7 @@ void nc_graph_destroy(NC_Graph *graph)
     graph->adam_count = 0;
     graph->adam_ready = false;
     graph->last_output = NULL;
+    graph->last_input = NULL;
     graph->sparse_cell = NULL;
 }
 

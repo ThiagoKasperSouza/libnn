@@ -49,6 +49,7 @@ typedef struct NC_Graph {
     float sparsity_beta;
     NC_Cell *sparse_cell;
     NC_Tensor *last_output;
+    NC_Tensor *last_input; /* view da entrada do último passo (vida na scratch) */
 } NC_Graph;
 
 /* Toda a memória vem da model arena; tape_capacity é o máximo de nós por iteração. */

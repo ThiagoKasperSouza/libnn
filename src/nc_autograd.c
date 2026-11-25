@@ -302,6 +302,17 @@ static void scale_backward(struct NC_TapeNode *node)
     }
 }
 
+static void exp_backward(struct NC_TapeNode *node)
+{
+    NC_Tensor *x = node->inputs[0];
+    const NC_Tensor *y = node->output;
+    if (x == NULL || y == NULL || y->grad == NULL) return;
+    for (size_t i = 0; i < x->size; ++i) {
+        accumulate(x, flat_index(x, i),
+                   y->grad[flat_index(y, i)] * y->data[flat_index(y, i)]);
+    }
+}
+
 static void softmax_backward(struct NC_TapeNode *node)
 {
     NC_Tensor *x = node->inputs[0];
@@ -964,6 +975,19 @@ NC_Tensor *nc_nn_softmax(NC_Tape *tape, NC_Arena *scratch,
         }
     }
     nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, softmax_backward, NULL);
+    return out;
+}
+
+NC_Tensor *nc_nn_exp(NC_Tape *tape, NC_Arena *scratch, const NC_Tensor *x)
+{
+    if (tape == NULL || scratch == NULL || x == NULL || x->ndim == 0 ||
+        x->ndim > 4) return NULL;
+    NC_Tensor *out = nc_tensor_create(scratch, x->shape, x->ndim, true);
+    if (out == NULL) return NULL;
+    for (size_t i = 0; i < x->size; ++i) {
+        out->data[i] = (float)exp((double)x->data[flat_index(x, i)]);
+    }
+    nc_autograd_record(tape, (NC_Tensor *)x, NULL, out, exp_backward, NULL);
     return out;
 }
 
