@@ -8,7 +8,7 @@ Exporta a topologia de qualquer `NC_Graph` para um arquivo `.svg` vetorial no es
 
 A aplicação renderiza dois grafos:
 - `nc_zoo_create_dae(&model, 8, 4, 0.2f)` — Denoising Autoencoder (8 entradas, 4 ocultas)
-- `nc_zoo_create_lstm(&model, 4, 6, 2)` — LSTM (4 entradas, 6 ocultas, 2 saídas)
+- `nc_zoo_create_lstm(&model, 3, 4, 3)` — LSTM (3 entradas, 4 memórias, 3 saídas)
 
 ## Como usar
 

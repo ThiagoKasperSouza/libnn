@@ -30,7 +30,7 @@ int main(void)
     printf("  SVG exportado: %s\n", out);
 
     /* Também exporta uma LSTM */
-    NC_Graph *lstm = nc_zoo_create_lstm(&model, 4, 6, 2);
+    NC_Graph *lstm = nc_zoo_create_lstm(&model, 3, 4, 3);
     if (lstm != NULL) {
         const char *out2 = "lstm_architecture.svg";
         if (nc_render_svg(lstm, out2) == 0)

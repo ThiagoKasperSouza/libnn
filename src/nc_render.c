@@ -134,6 +134,19 @@ static void append_neuron(char *buf, size_t bufsize, size_t *pos_ptr, int *tr_pt
     } while (0)
 }
 
+static int cell_is_recurrent(NC_CellType type)
+{
+    switch (type) {
+    case NC_CELL_BACKFED_INPUT:
+    case NC_CELL_RECURRENT:
+    case NC_CELL_MEMORY:
+    case NC_CELL_DIFFERENT_MEMORY:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Layout: uma coluna por camada, neurônios empilhados verticalmente   */
 /* ------------------------------------------------------------------ */
@@ -158,11 +171,13 @@ static int neuron_count(const NC_Graph *graph, size_t cell_id)
         if (dim > MAX_NEURONS_PER_LAYER) dim = MAX_NEURONS_PER_LAYER;
         return dim;
     }
-    /* Célula de entrada:usa a dimensão de entrada da próxima célula */
+    /* Célula de entrada: usa a dimensão de entrada da próxima célula.
+     * Células com portas (LSTM/GRU/NTM) guardam os pesos em gate_weights. */
     for (size_t e = 0; e < graph->edge_count; ++e) {
-        if (graph->edges[e].src_cell_id == cell_id &&
-            graph->edges[e].type != NC_EDGE_RECURRENT) {
-            const NC_Tensor *w = graph->cells[graph->edges[e].dst_cell_id].weights;
+        if (graph->edges[e].src_cell_id == cell_id) {
+            const NC_Cell *dst_cell = &graph->cells[graph->edges[e].dst_cell_id];
+            const NC_Tensor *w = dst_cell->weights;
+            if (w == NULL) w = dst_cell->gate_weights[0];
             if (w != NULL && w->ndim == 2) {
                 int dim = (int)w->shape[0];
                 if (dim < 1) dim = 1;
@@ -185,7 +200,6 @@ static int compute_layers(const NC_Graph *graph, int *layer_of)
     for (size_t i = 0; i < n; ++i) {
         int has_pred = 0;
         for (size_t e = 0; e < graph->edge_count; ++e) {
-            if (graph->edges[e].type == NC_EDGE_RECURRENT) continue;
             if (graph->edges[e].dst_cell_id == i) { has_pred = 1; break; }
         }
         if (!has_pred) layer_of[i] = 0;
@@ -195,7 +209,6 @@ static int compute_layers(const NC_Graph *graph, int *layer_of)
     while (changed && iterations < (int)n + 1) {
         changed = 0;
         for (size_t e = 0; e < graph->edge_count; ++e) {
-            if (graph->edges[e].type == NC_EDGE_RECURRENT) continue;
             size_t src = graph->edges[e].src_cell_id;
             size_t dst = graph->edges[e].dst_cell_id;
             if (src >= n || dst >= n) continue;
@@ -318,11 +331,36 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
         }
     }
 
+    /* Skip connections: primeira camada → última (como no guia LSTM) */
+    if (max_layer >= 2) {
+        for (size_t src = 0; src < n; ++src) {
+            if (layer_of[src] != 0) continue;
+            for (size_t dst = 0; dst < n; ++dst) {
+                if (layer_of[dst] != max_layer) continue;
+                for (int a = 0; a < cell_neurons[src]; ++a) {
+                    for (int b = 0; b < cell_neurons[dst]; ++b) {
+                        AF("    <line x1=\"%.1f\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" stroke=\"%s\" stroke-width=\"0.8\" stroke-dasharray=\"3,3\" marker-end=\"url(#arrow)\"/>\n",
+                           cx[src], cy[src][a], cx[dst], cy[dst][b], NC_COLOR_LINK);
+                    }
+                }
+            }
+        }
+    }
+
     /* Neurônios */
     for (size_t i = 0; i < n; ++i) {
         for (int k = 0; k < cell_neurons[i]; ++k) {
             append_neuron(buf, bufsize, &pos, &truncated, cx[i], cy[i][k],
                           graph->cells[i].type, NEURON_R);
+        }
+        /* Loops recorrentes (setas circulares acima das células de estado) */
+        if (cell_is_recurrent(graph->cells[i].type)) {
+            for (int k = 0; k < cell_neurons[i]; ++k) {
+                double lx = cx[i];
+                double ly = cy[i][k] - NEURON_R - 3.0;
+                AF("    <path d=\"M %.1f,%.1f A 9,9 0 1,1 %.1f,%.1f\" fill=\"none\" stroke=\"%s\" stroke-width=\"1.2\" marker-end=\"url(#arrow)\"/>\n",
+                   lx - 7.0, ly, lx + 7.0, ly, NC_COLOR_LINK);
+            }
         }
     }
 
