@@ -27,3 +27,6 @@ examples/apps/hopfield-memory/hopfield-memory
 examples/apps/rbm-cd/rbm-cd
 examples/apps/reservoir-predictor/reservoir-predictor
 examples/apps/kohonen-map/kohonen-map
+tests/test_render
+tests/test_render_asan
+examples/apps/render-graph/render-graph

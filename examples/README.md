@@ -15,6 +15,7 @@ Cada aplicação vive na sua própria pasta, com `main.c` e um `README.md` que e
 | [`rbm-cd`](./apps/rbm-cd/README.md) | 5 | RBM treinada com divergência contrastiva CD-k |
 | [`reservoir-predictor`](./apps/reservoir-predictor/README.md) | 5 | ELM com regressão ridge/pseudoinversa |
 | [`kohonen-map`](./apps/kohonen-map/README.md) | 5 | Mapa auto-organizável com BMU |
+| [`render-graph`](./apps/render-graph/README.md) | 6 | Exportação de topologia para SVG |
 
 ## Como compilar e executar
 

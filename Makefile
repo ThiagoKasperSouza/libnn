@@ -16,7 +16,7 @@ HDRS := $(wildcard include/*.h)
 LIB  := libnn.a
 
 TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo \
-         tests/test_spatial tests/test_sequence tests/test_energy
+         tests/test_spatial tests/test_sequence tests/test_energy tests/test_render
 SAN_TESTS := $(TESTS:tests/%=tests/%_asan)
 EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/xor-classifier/xor-classifier \
@@ -28,7 +28,8 @@ EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/hopfield-memory/hopfield-memory \
             examples/apps/rbm-cd/rbm-cd \
             examples/apps/reservoir-predictor/reservoir-predictor \
-            examples/apps/kohonen-map/kohonen-map
+            examples/apps/kohonen-map/kohonen-map \
+            examples/apps/render-graph/render-graph
 
 .PHONY: all lib tests test asan valgrind examples apps run_example run_examples run_apps clean
 
@@ -69,6 +70,8 @@ examples/apps/rbm-cd/rbm-cd: examples/apps/rbm-cd/main.c $(LIB) $(HDRS)
 examples/apps/reservoir-predictor/reservoir-predictor: examples/apps/reservoir-predictor/main.c $(LIB) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
 examples/apps/kohonen-map/kohonen-map: examples/apps/kohonen-map/main.c $(LIB) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
+examples/apps/render-graph/render-graph: examples/apps/render-graph/main.c $(LIB) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) -lm -o $@
 
 examples apps: $(EXAMPLES)

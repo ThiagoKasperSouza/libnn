@@ -22,5 +22,6 @@
 #include "nc_trainers.h"
 #include "nc_sequence.h"
 #include "nc_zoo.h"
+#include "nc_render.h"
 
 #endif /* NEUROCHART_H */
