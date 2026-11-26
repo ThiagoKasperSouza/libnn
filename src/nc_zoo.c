@@ -470,9 +470,16 @@ NC_Graph *nc_zoo_create_dbn(NC_Arena *model, size_t visible,
 
 NC_Graph *nc_zoo_create_vae(NC_Arena *model, size_t input_dim, size_t latent_dim)
 {
-    NC_Graph *g = nc_zoo_create_ae(model, input_dim, latent_dim);
+    NC_Graph *g = new_graph(model, 3, 2);
     if (g == NULL) return NULL;
-    NC_Cell *latent = &g->cells[1];
+    NC_Cell *input = nc_graph_add_cell(g, NC_CELL_INPUT, NC_ACT_LINEAR);
+    NC_Cell *latent = nc_graph_add_cell(g, NC_CELL_PROBABILISTIC_HIDDEN,
+                                       NC_ACT_LINEAR);
+    NC_Cell *recon = add_layer(g, NC_CELL_MATCH_INPUT_OUTPUT, NC_ACT_LINEAR,
+                               latent_dim, input_dim);
+    if (input == NULL || latent == NULL || recon == NULL ||
+        !nc_graph_connect(g, 0, 1, NC_EDGE_FORWARD) ||
+        !nc_graph_connect(g, 1, 2, NC_EDGE_FORWARD)) return NULL;
     const size_t ws[2] = { input_dim, latent_dim };
     latent->gate_weights[0] = nc_tensor_create(model, ws, 2, true);
     latent->gate_weights[1] = nc_tensor_create(model, ws, 2, true);

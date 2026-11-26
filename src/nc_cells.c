@@ -389,6 +389,15 @@ static NC_Tensor *ntm_forward(NC_Cell *cell, const NC_Tensor *input,
 static NC_Tensor *probabilistic_forward(NC_Cell *cell, const NC_Tensor *input,
                                         NC_Tape *tape, NC_Arena *scratch)
 {
+    /* Modo RBM/BM: usa weights/bias (populados por init_cd_cell) para
+     * calcular p(h|v) = sigmoid(v @ W + h_bias). */
+    if (cell->gate_weights[0] == NULL && cell->weights != NULL) {
+        NC_Tensor *logit = nc_nn_matmul(tape, scratch, input, cell->weights);
+        if (cell->bias != NULL) {
+            logit = nc_nn_add(tape, scratch, logit, cell->bias);
+        }
+        return nc_nn_activation(tape, scratch, logit, NC_OP_SIGMOID);
+    }
     /* Sem pesos de reconstrução, mantém o comportamento determinístico
      * usado pelo DCIGN (mu = x). */
     if (cell->gate_weights[0] == NULL || cell->gate_weights[1] == NULL) {
@@ -404,7 +413,7 @@ static NC_Tensor *probabilistic_forward(NC_Cell *cell, const NC_Tensor *input,
     }
     NC_Tensor *half = nc_nn_scale(tape, scratch, logvar, 0.5f);
     NC_Tensor *sigma = nc_nn_exp(tape, scratch, half);
-    NC_Tensor *eps = nc_tensor_create(scratch, input->shape, input->ndim, false);
+    NC_Tensor *eps = nc_tensor_create(scratch, mu->shape, mu->ndim, false);
     if (mu == NULL || sigma == NULL || eps == NULL) {
         return NULL;
     }
@@ -422,6 +431,7 @@ static NC_Tensor *spiking_forward(NC_Cell *cell, const NC_Tensor *input,
 {
     (void)tape; /* LIF não é diferenciável: usa STDP/Hebbian */
     if (cell->weights == NULL || input->ndim != 2) return NULL;
+    const size_t in_dim = input->shape[1];
     const size_t hidden = cell->weights->shape[1];
     const size_t n = input->shape[0];
     if (cell->state.spiking.membrane == NULL) {
@@ -431,14 +441,34 @@ static NC_Tensor *spiking_forward(NC_Cell *cell, const NC_Tensor *input,
         if (cell->state.spiking.membrane == NULL) return NULL;
         memset(cell->state.spiking.membrane, 0, hidden * sizeof(float));
     }
+    if (cell->state.spiking.neuron_count != in_dim + hidden ||
+        cell->state.spiking.last_pre_times == NULL ||
+        cell->state.spiking.last_post_times == NULL) {
+        cell->state.spiking.last_pre_times =
+            (float *)nc_arena_alloc(scratch, in_dim * sizeof(float),
+                                    NC_TENSOR_ALIGNMENT);
+        cell->state.spiking.last_post_times =
+            (float *)nc_arena_alloc(scratch, hidden * sizeof(float),
+                                    NC_TENSOR_ALIGNMENT);
+        if (cell->state.spiking.last_pre_times == NULL ||
+            cell->state.spiking.last_post_times == NULL) return NULL;
+        memset(cell->state.spiking.last_pre_times, 0, in_dim * sizeof(float));
+        memset(cell->state.spiking.last_post_times, 0, hidden * sizeof(float));
+        cell->state.spiking.neuron_count = in_dim + hidden;
+    }
     const size_t shape[2] = { n, hidden };
     NC_Tensor *out = nc_tensor_create(scratch, shape, 2, false);
     if (out == NULL) return NULL;
 
     for (size_t sample = 0; sample < n; ++sample) {
+        for (size_t a = 0; a < in_dim; ++a) {
+            if (input->data[sample * input->strides[0] + a] > 0.0f) {
+                cell->state.spiking.last_pre_times[a] = (float)(sample + 1);
+            }
+        }
         for (size_t h = 0; h < hidden; ++h) {
             float sum = 0.0f;
-            for (size_t a = 0; a < input->shape[1]; ++a) {
+            for (size_t a = 0; a < in_dim; ++a) {
                 sum += input->data[sample * input->strides[0] + a] *
                        cell->weights->data[a * hidden + h];
             }
@@ -453,7 +483,7 @@ static NC_Tensor *spiking_forward(NC_Cell *cell, const NC_Tensor *input,
                 v = cell->state.spiking.v_reset;
                 cell->state.spiking.current_refractory =
                     cell->state.spiking.refractory_steps;
-                cell->state.spiking.last_post_time += 1.0f;
+                cell->state.spiking.last_post_times[h] = (float)(sample + 1);
             }
             cell->state.spiking.membrane[h] = v;
             out->data[sample * hidden + h] = spike;

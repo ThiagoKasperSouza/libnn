@@ -45,8 +45,9 @@ typedef struct {
     float decay_rate;
     size_t refractory_steps;
     size_t current_refractory;
-    float last_pre_time;
-    float last_post_time;
+    float *last_pre_times;   /* timestamps do último spike pré por neurônio */
+    float *last_post_times;  /* timestamps do último spike pós por neurônio */
+    size_t neuron_count;     /* dimensão dos arrays de timestamps */
     float *membrane; /* potentials por neurônio, alocados na scratch */
 } NC_CellSpikingState;
 

@@ -15,7 +15,7 @@ static float sigmoidf(float x)
 static bool solve_linear(const float *A, const float *B, size_t n, size_t m,
                          float *out)
 {
-    if (n == 0 || m == 0 || n > 4096 || m > 4096) {
+    if (n == 0 || m == 0 || n > 8192 || m > 8192) {
         return false;
     }
     const size_t cols = n + m;
@@ -221,7 +221,7 @@ void nc_train_contrastive_divergence(NC_Graph *graph, NC_Tensor *input,
 
     for (size_t n = 0; n < batch; ++n) {
         memcpy(v_pos, input->data + n * vis, vis * sizeof(float));
-        for (size_t step = 0; step <= k_steps; ++step) {
+        for (size_t step = 0; step < k_steps; ++step) {
             /* Fase positiva: p(h|v_pos) e amostra binária. */
             for (size_t h = 0; h < hid; ++h) {
                 float sum = hb ? hb->data[h] : 0.0f;
@@ -315,10 +315,6 @@ void nc_train_stdp_step(NC_Graph *graph, float lr, float tau)
         if (pre == NULL || pre->ndim != 2 || cell->activity->ndim != 2) continue;
         const size_t in_dim = pre->shape[1];
         const size_t out_dim = cell->activity->shape[1];
-        const float dt = cell->state.spiking.last_post_time -
-                         cell->state.spiking.last_pre_time;
-        const float sign = dt >= 0.0f ? 1.0f : -1.0f;
-        const float magnitude = expf(-fabsf(dt) / tau);
         for (size_t n = 0; n < pre->shape[0]; ++n) {
             for (size_t a = 0; a < in_dim && a < cell->weights->shape[0]; ++a) {
                 for (size_t b = 0; b < out_dim && b < cell->weights->shape[1]; ++b) {
@@ -327,6 +323,10 @@ void nc_train_stdp_step(NC_Graph *graph, float lr, float tau)
                     const float post_spike =
                         cell->activity->data[n * cell->activity->strides[0] + b];
                     if (pre_spike <= 0.0f || post_spike <= 0.0f) continue;
+                    const float dt = cell->state.spiking.last_post_times[b] -
+                                     cell->state.spiking.last_pre_times[a];
+                    const float sign = dt >= 0.0f ? 1.0f : -1.0f;
+                    const float magnitude = expf(-fabsf(dt) / tau);
                     cell->weights->data[a * cell->weights->strides[0] +
                                         b * cell->weights->strides[1]] +=
                         lr * sign * magnitude;
@@ -447,6 +447,9 @@ void nc_train_kernel_hinge_loss(NC_Graph *graph, NC_Tensor *X,
         if (label * margin >= 1.0f) continue;
         for (size_t j = 0; j < features; ++j) {
             w->data[j] += lr * C * label * X->data[s * X->strides[0] + j];
+        }
+        if (cell->bias != NULL) {
+            cell->bias->data[0] += lr * C * label;
         }
     }
 }
