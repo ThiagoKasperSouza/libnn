@@ -38,9 +38,16 @@ Variantes da legenda recebem marcadores adicionais:
 - **Com borda** (Backfed, Noisy, Probabilistic, Spiking, Match, Memory, Different Memory, Conv/Pool): anel tracejado.
 - **Com triângulo** (Noisy, Spiking, Different Memory): triângulo preto.
 
-## 4. Layout
+## 4. Layout e estética (infográfico)
 
-O layout é topológico em camadas (BFS a partir das células sem predecessoras). Cada camada é posicionada horizontalmente com espaçamento de 120px; as células dentro de cada camada são distribuídas verticalmente com espaçamento de 70px. As arestas são desenhadas como linhas com setas indicando o fluxo de dados.
+O SVG reproduce a estética do infográfico de Fjodor van Veen:
+
+- **Neurônios**: cada camada do `NC_Graph` é expandida em múltiplos círculos (um por neurônio), com no máximo 8 por camada para manter o diagrama legível. A quantidade é inferida das dimensões dos pesos da célula.
+- **Conexões**: completamente conectadas entre camadas adjacentes (`fully-connected`), desenhadas como linhas finas com setas.
+- **Marcadores das variantes**: células "com borda" recebem um círculo concêntrico interno; células "com triângulo" recebem um triângulo preenchido dentro do círculo — exatamente como na legenda do guia.
+- **Sem rótulos de texto** dentro dos neurônios (o guia usa apenas cor + marcador).
+- **Legenda completa** com as 13 variantes do infográfico, em duas colunas.
+- Arestas recorrentes são desenhadas tracejadas e não participam do cálculo de camadas.
 
 ## 5. Certificação final
 

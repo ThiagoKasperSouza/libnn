@@ -26,8 +26,18 @@ static void test_render_basic(void)
     NC_CHECK(strstr(buf, "<svg") != NULL);
     NC_CHECK(strstr(buf, "</svg>") != NULL);
     NC_CHECK(strstr(buf, "#FFD700") != NULL); /* amarelo entrada */
-    NC_CHECK(strstr(buf, "#90EE90") != NULL); /* verde oculta */
-    NC_CHECK(strstr(buf, "#FF6347") != NULL); /* vermelho saída */
+    NC_CHECK(strstr(buf, "#33CC33") != NULL); /* verde oculta */
+    NC_CHECK(strstr(buf, "#FF6600") != NULL); /* laranja saída */
+    NC_CHECK(strstr(buf, "#3399FF") != NULL); /* azul recorrente */
+    NC_CHECK(strstr(buf, "#FF66B2") != NULL); /* rosa kernel */
+    /* Legenda completa com as 13 variantes */
+    NC_CHECK(strstr(buf, "Backfed Input Cell") != NULL);
+    NC_CHECK(strstr(buf, "Noisy Input Cell") != NULL);
+    NC_CHECK(strstr(buf, "Probabilistic Hidden Cell") != NULL);
+    NC_CHECK(strstr(buf, "Spiking Hidden Cell") != NULL);
+    NC_CHECK(strstr(buf, "Match Input Output Cell") != NULL);
+    NC_CHECK(strstr(buf, "Different Memory Cell") != NULL);
+    NC_CHECK(strstr(buf, "Convolution or Pool") != NULL);
 
     /* Arquivo */
     const char *fname = "/tmp/opencode/test_render.svg";

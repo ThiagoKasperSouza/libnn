@@ -24,17 +24,19 @@ int nc_render_svg(const NC_Graph *graph, const char *filename);
 
 Retorna 0 em sucesso, -1 em erro. Existe também `nc_render_svg_string` para renderização em buffer de memória (útil para testes e uso em servidores web).
 
-### Paleta de cores
+### Estética do infográfico
+
+O SVG reproduz o estilo do guia *"A mostly complete chart of Neural Networks"*:
 
 | Tipo de célula | Cor | Hex |
 | :-- | :-- | :-- |
 | Entrada (Input, Backfed, Noisy) | Amarelo | `#FFD700` |
-| Oculta (Hidden, Probabilistic, Spiking) | Verde | `#90EE90` |
-| Saída (Output, Match I/O) | Vermelho | `#FF6347` |
-| Recorrente (Recurrent, Memory, Different Memory) | Azul | `#87CEEB` |
-| Convolucional (Kernel, Conv/Pool) | Rosa | `#FFB6C1` |
+| Oculta (Hidden, Probabilistic, Spiking) | Verde | `#33CC33` |
+| Saída (Output, Match I/O) | Laranja | `#FF6600` |
+| Recorrente (Recurrent, Memory, Different Memory) | Azul | `#3399FF` |
+| Convolucional (Kernel, Conv/Pool) | Rosa | `#FF66B2` |
 
-Variantes (com borda, com triângulo) recebem marcadores adicionais conforme a legenda do infográfico.
+Cada camada é expandida em múltiplos neurônios com conexões totalmente conectadas. Variantes "com borda" têm um círculo concêntrico interno; variantes "com triângulo" têm um triângulo dentro da célula — idêntico à legenda do guia. A legenda completa com 13 variantes é incluída no rodapé.
 
 ## Saída esperada
 
