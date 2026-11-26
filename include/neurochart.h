@@ -11,7 +11,7 @@
  */
 
 #define NC_VERSION_MAJOR 0
-#define NC_VERSION_MINOR 1
+#define NC_VERSION_MINOR 6
 #define NC_VERSION_PATCH 0
 
 #include "nc_arena.h"

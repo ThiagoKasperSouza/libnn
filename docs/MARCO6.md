@@ -72,8 +72,10 @@ make run_apps → 11 aplicações sem vazamentos (incluindo render-graph)
 
 - O layout é linear (camadas horizontais); redes muito profundas ou com muitas conexões cruzadas podem ter sobreposição visual.
 - O SVG não inclui interatividade (hover, zoom); é um diagrama estático.
-- A renderização de grafos com mais de 4096 células não é suportada.
+- A renderização de grafos com mais de 4096 células ou 256 camadas não é suportada.
+- Arestas recorrentes (RNN/LSTM/GRU) são desenhadas mas não participam do cálculo de camadas.
 - O exportador não renderiza pesos/valores de ativação, apenas a topologia.
+- Grafos com ciclos (sem arestas recorrentes marcadas) podem ter layout incorreto.
 
 ## 7. Conclusão
 

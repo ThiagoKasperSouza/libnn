@@ -37,6 +37,8 @@ int main(void)
             printf("  SVG exportado: %s\n", out2);
     }
 
+    nc_graph_destroy(g);
+    if (lstm != NULL) nc_graph_destroy(lstm);
     nc_arena_free(&model);
     printf("=== Concluído. ===\n");
     return EXIT_SUCCESS;

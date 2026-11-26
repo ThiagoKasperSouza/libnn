@@ -134,13 +134,16 @@ static int compute_layers(const NC_Graph *graph, int *layer_of)
         }
     }
 
-    /* Propaga camadas */
+    /* Propaga camadas (ignora arestas recorrentes para evitar ciclos) */
     int iterations = 0;
     while (changed && iterations < (int)n + 1) {
         changed = 0;
         for (size_t e = 0; e < graph->edge_count; ++e) {
+            /* Ignora arestas recorrentes (criam ciclos) */
+            if (graph->edges[e].type == NC_EDGE_RECURRENT) continue;
             size_t src = graph->edges[e].src_cell_id;
             size_t dst = graph->edges[e].dst_cell_id;
+            if (src >= n || dst >= n) continue;
             if (layer_of[src] >= 0 && layer_of[dst] < 0) {
                 layer_of[dst] = layer_of[src] + 1;
                 if (layer_of[dst] > max_layer) max_layer = layer_of[dst];
@@ -183,13 +186,16 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
     if (n > MAX_CELLS) return -1;
     int max_layer = compute_layers(graph, layer_of);
 
-    /* Conta células por camada */
+    /* Conta células por camada (com guard contra OOB) */
     int layer_counts[MAX_LAYERS];
-    for (int i = 0; i <= max_layer && i < MAX_LAYERS; ++i) layer_counts[i] = 0;
+    for (int i = 0; i < MAX_LAYERS; ++i) layer_counts[i] = 0;
     for (size_t i = 0; i < n; ++i) {
         if (layer_of[i] >= 0 && layer_of[i] < MAX_LAYERS)
             layer_counts[layer_of[i]]++;
+        else
+            layer_of[i] = 0; /* fallback seguro */
     }
+    if (max_layer >= MAX_LAYERS) max_layer = MAX_LAYERS - 1;
 
     /* Posições */
     double px[MAX_CELLS], py[MAX_CELLS];
@@ -212,7 +218,10 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
         if (h > max_layer_height) max_layer_height = h;
     }
     double canvas_w = MARGIN * 2 + (max_layer + 1) * LAYER_SPACING;
-    double canvas_h = MARGIN * 2 + max_layer_height;
+    /* Garante espaço para a legenda (5 itens x 130px) */
+    double legend_w = 5 * 130.0 + MARGIN * 2;
+    if (legend_w > canvas_w) canvas_w = legend_w;
+    double canvas_h = MARGIN * 2 + max_layer_height + 70; /* espaço para legenda */
     if (canvas_w < 200) canvas_w = 200;
     if (canvas_h < 200) canvas_h = 200;
 
@@ -256,7 +265,7 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
     APPEND0("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     APPEND("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.0f\" height=\"%.0f\" viewBox=\"0 0 %.0f %.0f\">\n",
            canvas_w, canvas_h, canvas_w, canvas_h);
-    APPEND0("  <rect width=\"100%%\" height=\"100%%\" fill=\"#FFFFFF\"/>\n");
+    APPEND0("  <rect width=\"100%\" height=\"100%\" fill=\"#FFFFFF\"/>\n");
     APPEND0("  <defs>\n");
     APPEND0("    <marker id=\"arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"9\" refY=\"3\" orient=\"auto\" markerUnits=\"strokeWidth\">\n");
     APPEND0("      <path d=\"M0,0 L0,6 L9,3 z\" fill=\"#555555\"/>\n");
@@ -294,7 +303,7 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
         }
 
         /* Marcador de borda (anel) para variantes "com borda" */
-        if (border && !tri) {
+        if (border) {
             APPEND("  <circle cx=\"%.1f\" cy=\"%.1f\" r=\"%.1f\" fill=\"none\" stroke=\"#333333\" stroke-width=\"1\" stroke-dasharray=\"3,2\"/>\n",
                    px[i], py[i], CELL_RADIUS + 4);
         }
@@ -305,7 +314,7 @@ static long render_to_buffer(const NC_Graph *graph, char *buf, size_t bufsize)
     }
 
     /* Legenda */
-    APPEND("  <g transform=\"translate(10, %.0f)\">\n", canvas_h - 60);
+    APPEND("  <g transform=\"translate(10, %.0f)\">\n", canvas_h - 65);
     APPEND0("    <text x=\"0\" y=\"0\" font-family=\"sans-serif\" font-size=\"11\" font-weight=\"bold\" fill=\"#333333\">Legenda:</text>\n");
     const char *legend_items[] = {
         "Entrada (amarelo)", "Oculta (verde)", "Saída (vermelho)",

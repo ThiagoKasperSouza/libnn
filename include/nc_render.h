@@ -19,9 +19,14 @@ int nc_render_svg(const NC_Graph *graph, const char *filename);
 
 /*
  * nc_render_svg_string — Variante que escreve o SVG em um buffer fornecido
- * pelo chamador (útil para testes e uso em memória). Retorna o número de
- * bytes escritos (sem o '\0' final) ou -1 em erro. Se buffer for NULL,
- * retorna apenas o tamanho necessário.
+ * pelo chamador (útil para testes e uso em memória).
+ *
+ * Contrato de buffer:
+ *   - Se buffer == NULL: retorna o tamanho necessário (em bytes, sem '\0').
+ *   - Se buffer != NULL e buffer_size suficiente: escreve o SVG, termina
+ *     com '\0' e retorna o número de bytes escritos (sem '\0').
+ *   - Se buffer != NULL mas buffer_size insuficiente: retorna -1.
+ *     Neste caso, chame novamente com buffer=NULL para obter o tamanho.
  */
 long nc_render_svg_string(const NC_Graph *graph, char *buffer, size_t buffer_size);
 
