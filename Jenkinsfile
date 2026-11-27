@@ -115,12 +115,15 @@ pipeline {
         }
 
         stage('Python bindings') {
-            agent { docker { image 'python:3.12-slim-bookworm'; args '-u root:root' } }
+            agent { docker { image "${env.IMAGE_BUILD}"; args '-u root:root' } }
             steps {
                 checkout scm
                 sh '''
                     set -eu
-                    apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential
+                    apt-get update -qq
+                    apt-get install -y -qq --no-install-recommends python3 python3-pip python3-venv
+                    python3 -m venv /tmp/pyenv
+                    . /tmp/pyenv/bin/activate
                     make lib
                     python -m pip install --no-cache-dir -q pytest
                     python -m pip install --no-cache-dir -q -e python
