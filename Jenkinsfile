@@ -66,7 +66,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     make clean
                     make lib
                     make test
@@ -85,7 +85,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     make clean
                     make lib
                     make asan
@@ -98,7 +98,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     apt-get update -qq
                     apt-get install -y -qq --no-install-recommends lcov python3
                     make coverage
@@ -119,7 +119,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     apt-get update -qq && apt-get install -y -qq --no-install-recommends build-essential
                     make lib
                     python -m pip install --no-cache-dir -q pytest
@@ -158,7 +158,7 @@ pipeline {
                     "SONAR_ORGANIZATION=${env.SONAR_ORGANIZATION}"
                 ]) {
                     sh '''
-                        set -euo pipefail
+                        set -eu
 
                         # 1) Compila instrumentando os comandos do compilador.
                         make clean
@@ -216,7 +216,7 @@ pipeline {
             steps {
                 checkout scm
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     make lib
 
                     mkdir -p snyk-reports
