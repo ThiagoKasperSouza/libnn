@@ -12,6 +12,7 @@ e garante reprodutibilidade.
 | Checkout | `gcc:14-bookworm` | `checkout scm` | `build.commit`, `build.info` |
 | Build & Test | `gcc:14-bookworm` | `make clean && make lib && make test` | `libnn.a`, `libnn_shared.so` |
 | Sanitizers | `gcc:14-bookworm` | `make asan` | — |
+| Coverage | `gcc:14-bookworm` | `make coverage` (gcov + lcov) | `coverage.xml`, `coverage.info` |
 | Python bindings | `python:3.12-slim-bookworm` | `pytest python/tests -q` | — |
 | SonarQube | `libnn-ci-sonar:latest` | build-wrapper + sonar-scanner | quality gate |
 | Snyk | `snyk/snyk:alpine` | `snyk monitor` + `snyk code test` | `snyk-reports/*.json` |
@@ -45,7 +46,30 @@ e garante reprodutibilidade.
 Em **Manage Jenkins → Configure System → SonarQube servers**, registre um
 servidor chamado `sonarqube`. O `waitForQualityGate` usa essa configuração.
 
-### 3.4 Variáveis
+### 3.4 Cobertura (gcov/lcov → SonarQube)
+
+O estágio **Coverage** instrumenta o código com `--coverage -O0 -g`, executa
+toda a suíte, captura os dados com `lcov` e converte para o formato
+**SonarQube Generic Coverage** usando `ci/lcov_to_sonar.py`. O resultado
+`coverage.xml` é:
+
+1. Arquivado como artifact do build;
+2. Enviado ao estágio SonarQube via `stash`/`unstash` (cada estágio tem seu
+   próprio container/workspace);
+3. Passado ao scanner com `-Dsonar.coverageReportPaths=coverage.xml`.
+
+O conversor lê os registros `SF:` (arquivo), `DA:` (linha/execuções) e `BRDA:`
+(branch/taken) do `.info`, remove o prefixo do workspace e gera
+`<coverage version="1">` com `<file path="src/...">` e `<lineToCover>`.
+
+Para rodar localmente (requer `lcov` e `python3`):
+
+```sh
+make coverage
+head -20 coverage.xml
+```
+
+### 3.5 Variáveis
 No topo do Jenkinsfile:
 
 ```groovy
@@ -115,9 +139,8 @@ snyk monitor --project-name=libnn
 
 - O quality gate depende das regras configuradas no servidor SonarQube; este
   repositório não define thresholds.
-- A cobertura de código não é enviada ao SonarQube (sem `lcov`/`gcov` integrado).
-  Para adicionar: instrumentar com `--coverage` e publicar via
-  `sonar.coverageReportPaths`.
+- A cobertura depende de `lcov` estar disponível no estágio Coverage
+  (instalado via `apt-get` dentro do container `gcc:14-bookworm`).
 - `snyk monitor` para um projeto sem manifesto pode exigir `--file` apontando
   para um arquivo de dependências quando houver um.
 - A imagem `libnn-ci-sonar:latest` precisa existir no daemon Docker do Jenkins

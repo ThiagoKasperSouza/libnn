@@ -30,3 +30,12 @@ examples/apps/kohonen-map/kohonen-map
 tests/test_render
 tests/test_render_asan
 examples/apps/render-graph/render-graph
+test_render_output.svg
+test_render_null.svg
+coverage.info
+coverage.raw.info
+coverage.xml
+*.gcda
+*.gcno
+__pycache__/
+*.pyc

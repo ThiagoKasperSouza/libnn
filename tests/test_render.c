@@ -40,7 +40,7 @@ static void test_render_basic(void)
     NC_CHECK(strstr(buf, "Convolution or Pool") != NULL);
 
     /* Arquivo */
-    const char *fname = "/tmp/opencode/test_render.svg";
+    const char *fname = "test_render_output.svg";
     NC_CHECK(nc_render_svg(g, fname) == 0);
 
     /* Verifica conteúdo do arquivo */
@@ -88,7 +88,7 @@ static void test_render_all_types(void)
 
 static void test_render_null(void)
 {
-    NC_CHECK(nc_render_svg(NULL, "/tmp/opencode/x.svg") == -1);
+    NC_CHECK(nc_render_svg(NULL, "test_render_null.svg") == -1);
     NC_CHECK(nc_render_svg_string(NULL, NULL, 0) == -1);
 }
 

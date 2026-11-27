@@ -9,6 +9,7 @@ override CFLAGS := $(NC_REQUIRED_CFLAGS) $(CFLAGS)
 override CPPFLAGS += -Iinclude
 
 SANFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1
+COVFLAGS = --coverage -O0 -g
 
 SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:.c=.o)
@@ -32,7 +33,7 @@ EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/kohonen-map/kohonen-map \
             examples/apps/render-graph/render-graph
 
-.PHONY: all lib shared tests test asan valgrind examples apps run_example run_examples run_apps clean
+.PHONY: all lib shared tests test asan coverage valgrind examples apps run_example run_examples run_apps clean
 
 all: lib shared
 
@@ -103,6 +104,17 @@ asan: $(SAN_TESTS)
 		ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./$$t || exit 1; \
 	done
 
+# Cobertura de código: instrumenta com gcov, executa a suíte, captura com lcov
+# e converte para o formato SonarQube Generic Coverage (coverage.xml).
+coverage:
+	$(MAKE) clean
+	$(MAKE) lib test CFLAGS="$(COVFLAGS)" LDFLAGS="$(COVFLAGS)"
+	lcov --capture --rc lcov_branch_coverage=1 --directory . --output-file coverage.raw.info
+	lcov --remove coverage.raw.info --rc lcov_branch_coverage=1 '/usr/*' '*/tests/*' --output-file coverage.info
+	rm -f coverage.raw.info
+	python3 ci/lcov_to_sonar.py coverage.info coverage.xml .
+	@echo "Cobertura gerada: coverage.xml"
+
 valgrind: tests
 	@if command -v valgrind >/dev/null 2>&1; then \
 		for t in $(TESTS); do \
@@ -113,4 +125,5 @@ valgrind: tests
 	fi
 
 clean:
-	rm -f $(OBJS) $(LIB) $(SHLIB) python/libnn/$(SHLIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES)
+	rm -f $(OBJS) $(LIB) $(SHLIB) python/libnn/$(SHLIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES) \
+	      coverage.info coverage.raw.info coverage.xml *.gcda *.gcno src/*.gcda src/*.gcno tests/*.gcda tests/*.gcno

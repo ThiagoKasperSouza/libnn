@@ -85,6 +85,27 @@ pipeline {
             }
         }
 
+        stage('Coverage (gcov/lcov)') {
+            agent { docker { image "${env.IMAGE_BUILD}"; args '-u root:root' } }
+            steps {
+                checkout scm
+                sh '''
+                    set -euo pipefail
+                    apt-get update -qq
+                    apt-get install -y -qq --no-install-recommends lcov python3
+                    make coverage
+                '''
+                // O estágio Sonar usa outro container/workspace: passa o XML por stash.
+                stash includes: 'coverage.xml', name: 'sonar-coverage'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'coverage.xml, coverage.info',
+                                     allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Python bindings') {
             agent { docker { image 'python:3.12-slim-bookworm'; args '-u root:root' } }
             steps {
@@ -119,6 +140,8 @@ pipeline {
             steps {
                 // checkout novamente: cada estágio tem workspace e container próprios.
                 checkout scm
+                // Recupera o XML de cobertura gerado no estágio Coverage.
+                unstash 'sonar-coverage'
                 withEnv([
                     "SONAR_PROJECT_KEY=${env.SONAR_PROJECT_KEY}",
                     "SONAR_ORGANIZATION=${env.SONAR_ORGANIZATION}"
@@ -151,6 +174,7 @@ pipeline {
                             -Dsonar.exclusions=docs/gallery/**,python/**,examples/** \
                             -Dsonar.cfamily.threads=2 \
                             -Dsonar.cfamily.cache.enabled=true \
+                            -Dsonar.coverageReportPaths=coverage.xml \
                             $args
                     '''
                 }

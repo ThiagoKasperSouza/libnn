@@ -70,6 +70,17 @@ docker run --rm libnn-ci-sonar:latest /bin/sh -c \
   'sonar-scanner --version; build-wrapper-linux-x86-64 --version'
 ```
 
+## Conversor de cobertura
+
+`ci/lcov_to_sonar.py` converte o `.info` do lcov para o XML genérico que o
+SonarQube consome via `sonar.coverageReportPaths`:
+
+```sh
+python3 ci/lcov_to_sonar.py coverage.info coverage.xml .
+```
+
+O terceiro argumento (opcional) é o diretório-raiz removido dos caminhos `SF:`.
+
 ## Rodar localmente (sem Jenkins)
 
 ```sh
