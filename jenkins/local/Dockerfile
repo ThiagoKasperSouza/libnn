@@ -35,6 +35,6 @@ USER jenkins
 COPY jenkins/local/plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 
-ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true"
 ENV CASC_JENKINS_CONFIG="/usr/share/jenkins/ref/casc.yaml"
 COPY jenkins/local/casc.yaml /usr/share/jenkins/ref/casc.yaml
