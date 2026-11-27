@@ -105,7 +105,13 @@ make test / make asan             → suíte C intacta (8 binários)
   `nc_tensor_flatten`. As 27 fábricas do zoo, por outro lado, estão todas
   cobertas.
 
-## 7. Próximos passos
+## 7. Galeria interativa
+
+A galeria em [`docs/gallery/`](./gallery/README.md) mostra as 27 arquiteturas
+com filtros por família e detalhes por clique. Os SVGs e `data.js` são gerados
+por `python/examples/generate_gallery.py` a partir da API Python.
+
+## 8. Próximos passos
 
 1. Expor tensores de baixo nível e operações de álgebra linear.
 3. Gerenciar o ciclo de vida do tensor de saída em relação ao `scratch.reset()`.

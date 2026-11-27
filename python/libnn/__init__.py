@@ -381,6 +381,18 @@ class Graph:
         return cls(ptr, arena)
 
     @classmethod
+    def sae(cls, arena, input_dim, hidden_dim, sparsity_target=0.05, beta=1.0):
+        arena._ensure_open()
+        ptr = _core.lib.nc_zoo_create_sae(
+            byref(arena._arena),
+            c_size_t(input_dim),
+            c_size_t(hidden_dim),
+            c_float(sparsity_target),
+            c_float(beta),
+        )
+        return cls(ptr, arena)
+
+    @classmethod
     def vae(cls, arena, input_dim, latent_dim):
         return cls._factory(_core.lib.nc_zoo_create_vae, arena, input_dim, latent_dim)
 

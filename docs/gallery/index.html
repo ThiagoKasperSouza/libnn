@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>libnn — Galeria das 27 arquiteturas neurais</title>
+<style>
+  :root {
+    --ink: #1b2430;
+    --muted: #5d6b7a;
+    --line: #d9e0e8;
+    --bg: #ffffff;
+    --panel: #f7f9fc;
+    --accent: #1f5fa8;
+    --accent-soft: #e8f1fb;
+    --radius: 10px;
+    --shadow: 0 2px 10px rgba(20, 40, 70, 0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.5;
+  }
+  header {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #fbfdff, #ffffff);
+  }
+  header h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 0.95rem; }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 0 24px 48px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 18px 0;
+  }
+  .chip {
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--ink); padding: 6px 12px; border-radius: 999px;
+    font: inherit; font-size: 0.85rem; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .count { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+
+  .layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: #fff; padding: 10px; cursor: pointer;
+    box-shadow: var(--shadow); transition: transform 0.12s, border-color 0.12s;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .card img { width: 100%; height: auto; display: block; background: #fff; border-radius: 6px; }
+  .card .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; }
+  .card .sig { font-weight: 700; font-size: 0.9rem; }
+  .card .nm { font-size: 0.78rem; color: var(--muted); text-align: right; min-width: 0; }
+
+  aside {
+    position: sticky; top: 16px; border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; background: var(--panel);
+    min-width: 0;
+  }
+  aside h2 { margin: 0 0 4px; font-size: 1.3rem; }
+  aside .sigla {
+    display: inline-block; background: var(--accent); color: #fff;
+    padding: 2px 9px; border-radius: 6px; font-weight: 700; font-size: 0.8rem;
+    margin-bottom: 10px;
+  }
+  aside .family { color: var(--accent); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  aside dl { margin: 16px 0 0; }
+  aside dt { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 12px; }
+  aside dd { margin: 3px 0 0; font-size: 0.9rem; }
+  aside code {
+    display: block; white-space: pre-wrap; word-break: break-word;
+    background: #fff; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; font-size: 0.8rem; margin-top: 4px;
+  }
+  .placeholder { color: var(--muted); font-size: 0.9rem; }
+
+  footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.82rem; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position: static; order: -1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="padding-bottom:0">
+    <h1>libnn — galeria das 27 arquiteturas</h1>
+    <p>Diagramas gerados automaticamente da topologia de cada <code>NC_Graph</code> pelo exportador SVG da libnn.</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="toolbar" id="toolbar"></div>
+  <div class="layout">
+    <div class="grid" id="grid"></div>
+    <aside id="detail">
+      <h2>Detalhes</h2>
+      <p class="placeholder">Selecione uma arquitetura na grade para ver células, treinador e o código de criação.</p>
+    </aside>
+  </div>
+  <footer>
+    Cores e marcadores seguem o infográfico <em>A mostly complete chart of Neural Networks</em>
+    (Fjodor van Veen, Asimov Institute). Regenerar com
+    <code>make lib &amp;&amp; python3 python/examples/generate_gallery.py</code>.
+  </footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+(function () {
+  const data = window.GALLERY_DATA || [];
+  const order = ["feedforward", "autoencoder", "energia", "convolucional",
+                 "recorrente", "reservatorio", "competitivo", "generativo"];
+  const families = order.filter(f => data.some(d => d.family === f));
+
+  let active = "all";
+  let selected = null;
+
+  const toolbar = document.getElementById("toolbar");
+  const grid = document.getElementById("grid");
+  const detail = document.getElementById("detail");
+
+  function makeChip(label, value) {
+    const b = document.createElement("button");
+    b.className = "chip" + (value === active ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      active = value;
+      [...toolbar.querySelectorAll(".chip")].forEach(c => c.classList.remove("active"));
+      b.classList.add("active");
+      render();
+    });
+    return b;
+  }
+
+  toolbar.appendChild(makeChip("Todas", "all"));
+  families.forEach(f => {
+    const label = (data.find(d => d.family === f) || {}).familyLabel || f;
+    toolbar.appendChild(makeChip(label, f));
+  });
+
+  const count = document.createElement("span");
+  count.className = "count";
+  toolbar.appendChild(count);
+
+  function esc(s) {
+    const div = document.createElement("div");
+    div.textContent = String(s);
+    return div.innerHTML;
+  }
+
+  function showDetail(d) {
+    selected = d.sigla;
+    detail.innerHTML =
+      '<h2>' + esc(d.name) + '</h2>' +
+      '<span class="sigla">' + esc(d.sigla) + '</span>' +
+      '<div class="family">' + esc(d.familyLabel) + '</div>' +
+      '<p>' + esc(d.description) + '</p>' +
+      '<dl>' +
+        '<dt>Células</dt><dd>' + esc(d.cells) + '</dd>' +
+        '<dt>Treinador</dt><dd>' + esc(d.trainer) + '</dd>' +
+        '<dt>Criação (Python)</dt><dd><code>' + esc(d.snippet) + '</code></dd>' +
+      '</dl>';
+    [...grid.children].forEach(c => c.classList.toggle("selected", c.dataset.sigla === selected));
+  }
+
+  function render() {
+    const items = data.filter(d => active === "all" || d.family === active);
+    count.textContent = items.length + " de " + data.length + " arquiteturas";
+    grid.innerHTML = "";
+    items.forEach(d => {
+      const card = document.createElement("div");
+      card.className = "card" + (d.sigla === selected ? " selected" : "");
+      card.dataset.sigla = d.sigla;
+      card.innerHTML =
+        '<img src="' + esc(d.svg) + '" alt="Diagrama ' + esc(d.name) + '">' +
+        '<div class="meta"><span class="sig">' + esc(d.sigla) + '</span>' +
+        '<span class="nm">' + esc(d.name) + '</span></div>';
+      card.addEventListener("click", () => showDetail(d));
+      grid.appendChild(card);
+    });
+  }
+
+  render();
+  if (data.length) showDetail(data[0]);
+})();
+</script>
+</body>
+</html>

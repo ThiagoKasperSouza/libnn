@@ -86,6 +86,15 @@ net = nn.Graph.dff(model, input_dim=4, hidden_dims=[8, 6], output_dim=2)
 Tensores de baixo nível (matmul, conv, im2col) e as operações `nc_nn_*`
 permanecem disponíveis apenas em C.
 
+## Galeria de arquiteturas
+
+Gere os 27 diagramas SVG e a página interativa:
+
+```sh
+python3 python/examples/generate_gallery.py
+xdg-open docs/gallery/index.html
+```
+
 ## Testes
 
 ```sh

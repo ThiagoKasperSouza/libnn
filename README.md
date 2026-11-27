@@ -83,7 +83,8 @@ libnn/
 │   ├── MARCO4.md
 │   ├── MARCO5.md
 │   ├── MARCO6.md
-│   └── PYTHON-BINDINGS.md
+│   ├── PYTHON-BINDINGS.md
+│   └── gallery/         # index.html + data.js + svgs/ (27 diagramas)
 ├── Makefile
 └── README.md
 ```
@@ -224,7 +225,9 @@ python3 -m pip install -e python
 python3 python/examples/xor.py
 ```
 
-Ver [`python/README.md`](./python/README.md) e [`docs/PYTHON-BINDINGS.md`](./docs/PYTHON-BINDINGS.md).
+Galeria interativa das 27 arquiteturas: [`docs/gallery/index.html`](./docs/gallery/index.html).
+
+Ver [`python/README.md`](./python/README.md), [`docs/PYTHON-BINDINGS.md`](./docs/PYTHON-BINDINGS.md) e [`docs/gallery/README.md`](./docs/gallery/README.md).
 
 ## Validação
 
