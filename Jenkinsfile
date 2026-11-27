@@ -54,7 +54,6 @@ pipeline {
         stage('Checkout') {
             agent { docker { image "${env.IMAGE_BUILD}"; args '-u root:root' } }
             steps {
-                deleteDir()
                 checkout scm
                 sh 'git rev-parse HEAD | tee build.commit'
                 sh 'git log -1 --format="%h %ad %s" --date=short | tee build.info'
