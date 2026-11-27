@@ -2,7 +2,7 @@
 
 SDK de redes neurais em **C11 puro, zero dependências externas** (apenas `stdlib`, `math`, `string`, `stdint`, `stddef`, `stdbool`). A arquitetura completa e o roadmap estão em [`Plano de Arquitetura_ SDK de Redes Neurais em C Puro (Zero Dependências).md`](./Plano%20de%20Arquitetura_%20SDK%20de%20Redes%20Neurais%20em%20C%20Puro%20%28Zero%20Depend%C3%AAncias%29.md).
 
-**Status:** Marcos 1 a 6 implementados (certificação final). Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md) a [`docs/MARCO6.md`](./docs/MARCO6.md).
+**Status:** Marcos 1 a 6 implementados (certificação final) + bindings Python. Detalhes em [`docs/MARCO1.md`](./docs/MARCO1.md) a [`docs/MARCO6.md`](./docs/MARCO6.md).
 
 ## Marcos
 
@@ -43,7 +43,8 @@ libnn/
 │   ├── nc_topology.h  # NC_Graph, arestas e forward/backward
 │   ├── nc_trainers.h  # Adam, MSE e treino GAN
 │   ├── nc_sequence.h  # unrolling temporal e BPTT
-│   └── nc_zoo.h       # construtores das 11 topologias implementadas
+│   ├── nc_zoo.h       # construtores das topologias implementadas
+│   └── nc_render.h    # exportador SVG
 ├── src/                # um .c por header acima (exceto neurochart.h)
 ├── examples/
 │   ├── README.md       # índice das aplicações
@@ -67,14 +68,22 @@ libnn/
 │   ├── test_autograd.c
 │   ├── test_zoo.c
 │   ├── test_spatial.c
-│   └── test_sequence.c
+│   ├── test_sequence.c
+│   ├── test_energy.c
+│   └── test_render.c
+├── python/
+│   ├── pyproject.toml
+│   ├── libnn/         # __init__.py (API) + _core.py (ctypes)
+│   ├── tests/         # test_bindings.py
+│   └── examples/xor.py
 ├── docs/
 │   ├── MARCO1.md
 │   ├── MARCO2.md
 │   ├── MARCO3.md
 │   ├── MARCO4.md
 │   ├── MARCO5.md
-│   └── MARCO6.md
+│   ├── MARCO6.md
+│   └── PYTHON-BINDINGS.md
 ├── Makefile
 └── README.md
 ```
@@ -202,6 +211,19 @@ Exemplos completos: o índice em [`examples/README.md`](./examples/README.md) li
 | :-- | :-- |
 | `nc_render_svg(graph, filename)` | Exporta topologia para arquivo SVG |
 | `nc_render_svg_string(graph, buf, size)` | Renderiza SVG em buffer de memória |
+
+## Bindings Python
+
+Wrapper `ctypes` sobre a biblioteca compartilhada, com API Pythonic
+(`Arena`, `Tensor`, `Graph`, `Adam`) e exportação SVG:
+
+```sh
+make lib
+python3 -m pip install -e python
+python3 python/examples/xor.py
+```
+
+Ver [`python/README.md`](./python/README.md) e [`docs/PYTHON-BINDINGS.md`](./docs/PYTHON-BINDINGS.md).
 
 ## Validação
 

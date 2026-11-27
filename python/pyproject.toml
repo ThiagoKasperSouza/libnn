@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libnn"
+version = "0.1.0"
+description = "Bindings Python (ctypes) para o SDK libnn — redes neurais em C puro"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools]
+packages = ["libnn"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

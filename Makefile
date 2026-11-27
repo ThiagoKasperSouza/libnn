@@ -14,6 +14,7 @@ SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:.c=.o)
 HDRS := $(wildcard include/*.h)
 LIB  := libnn.a
+SHLIB := libnn_shared.so
 
 TESTS := tests/test_arena tests/test_tensor tests/test_autograd tests/test_zoo \
          tests/test_spatial tests/test_sequence tests/test_energy tests/test_render
@@ -31,14 +32,20 @@ EXAMPLES := examples/apps/tensor-basics/tensor-basics \
             examples/apps/kohonen-map/kohonen-map \
             examples/apps/render-graph/render-graph
 
-.PHONY: all lib tests test asan valgrind examples apps run_example run_examples run_apps clean
+.PHONY: all lib shared tests test asan valgrind examples apps run_example run_examples run_apps clean
 
-all: lib
+all: lib shared
 
-lib: $(LIB)
+lib: $(LIB) $(SHLIB)
+
+shared: $(SHLIB)
 
 $(LIB): $(OBJS)
 	$(AR) rcs $@ $^
+
+# Biblioteca compartilhada para os bindings Python (ctypes).
+$(SHLIB): $(SRCS) $(HDRS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -shared $(SRCS) -lm -o $@
 
 src/%.o: src/%.c $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
@@ -105,4 +112,4 @@ valgrind: tests
 	fi
 
 clean:
-	rm -f $(OBJS) $(LIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES)
+	rm -f $(OBJS) $(LIB) $(SHLIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES)
