@@ -69,6 +69,7 @@ pipeline {
                     make clean
                     make lib
                     make test
+                    chown -R 1000:1000 . || true
                 '''
             }
             post {
@@ -88,6 +89,7 @@ pipeline {
                     make clean
                     make lib
                     make asan
+                    chown -R 1000:1000 . || true
                 '''
             }
         }
@@ -101,6 +103,7 @@ pipeline {
                     apt-get update -qq
                     apt-get install -y -qq --no-install-recommends lcov python3
                     make coverage
+                    chown -R 1000:1000 . || true
                 '''
                 // O estágio Sonar usa outro container/workspace: passa o XML por stash.
                 stash includes: 'coverage.xml', name: 'sonar-coverage'
