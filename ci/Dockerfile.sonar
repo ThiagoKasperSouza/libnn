@@ -16,11 +16,22 @@ FROM sonarsource/sonar-scanner-cli:latest
 USER root
 
 ARG BUILD_WRAPPER_URL="https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip"
+# SHA-256 do zip público acima. Ao apontar para um servidor on-prem, substitua
+# também este valor pelo checksum do zip daquele servidor.
+ARG BUILD_WRAPPER_SHA256="37e7631bcf1412dbfc3d5c2a469cd228348cc8f9bee5b8a42b77e170a4acf5ab"
 
 RUN yum install -y --setopt=install_weak_deps=False \
         unzip gcc make glibc-devel \
     && yum clean all \
-    && curl -fsSL -o /tmp/bw.zip "${BUILD_WRAPPER_URL}" \
+    && case "${BUILD_WRAPPER_URL}" in \
+           https://*) ;; \
+           *) echo "BUILD_WRAPPER_URL deve usar HTTPS" >&2; exit 1 ;; \
+       esac \
+    && curl --fail --show-error --silent --location \
+           --proto '=https' --proto-redir '=https' --tlsv1.2 \
+           --max-time 120 \
+           -o /tmp/bw.zip "${BUILD_WRAPPER_URL}" \
+    && echo "${BUILD_WRAPPER_SHA256}  /tmp/bw.zip" | sha256sum -c - \
     && unzip -q /tmp/bw.zip -d /opt \
     && rm /tmp/bw.zip \
     && find /opt -name 'build-wrapper-linux-x86-64' -type f -exec chmod +x {} \; \

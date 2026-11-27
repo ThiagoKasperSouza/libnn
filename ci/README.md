@@ -60,8 +60,12 @@ docker build -f ci/Dockerfile.sonar -t libnn-ci-sonar:latest .
 A imagem herda de `sonarsource/sonar-scanner-cli:latest` (Amazon Linux 2023)
 e instala gcc/make/glibc-devel via yum. O `build-wrapper` do CFamily é
 específico da versão do servidor: por padrão o Dockerfile baixa o pacote
-público do SonarCloud. Para SonarQube on-prem, substitua `BUILD_WRAPPER_URL`
-pela URL do zip disponível em Administration → Tools & Settings → C/C++.
+público do SonarCloud (SHA-256 fixado em `BUILD_WRAPPER_SHA256`). O download
+usa `curl --proto '=https' --proto-redir '=https' --tlsv1.2` e rejeita URLs
+que não comecem com `https://`, portanto redirecionamentos para HTTP são
+bloqueados. Para SonarQube on-prem, substitua **ambos** `BUILD_WRAPPER_URL` e
+`BUILD_WRAPPER_SHA256` pelos valores do zip disponível em Administration →
+Tools & Settings → C/C++.
 
 Verificação local rápida:
 

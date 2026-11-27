@@ -87,10 +87,20 @@ imagem no mesmo Docker daemon usado pelo Jenkins:
 docker build -f ci/Dockerfile.sonar -t libnn-ci-sonar:latest .
 ```
 
-Se o seu SonarQube for on-prem, baixe o `build-wrapper-linux-x86.zip` da
-própria instância (**Administration → Tools & Settings → C/C++**) e coloque
-em `ci/build-wrapper-linux-x86.zip` antes do build. Isso garante que a versão
-do wrapper seja compatível com o servidor.
+Se o seu SonarQube for on-prem, obtenha o `build-wrapper-linux-x86.zip` da
+própria instância (**Administration → Tools & Settings → C/C++**), sirva-o por
+HTTPS e configure o build com `-f` (ou `--build-arg`):
+
+```sh
+docker build -f ci/Dockerfile.sonar -t libnn-ci-sonar:latest \
+  --build-arg BUILD_WRAPPER_URL=https://sonar.exemplo.com/static/cpp/build-wrapper-linux-x86.zip \
+  --build-arg BUILD_WRAPPER_SHA256=<sha256-do-zip> .
+```
+
+O Dockerfile valida o esquema HTTPS, força `--proto '=https'` e
+`--proto-redir '=https'` no `curl` e confere o SHA-256 antes de descompactar.
+Isso evita redirecionamentos para sites inseguros e garante a integridade do
+binário.
 
 ## 5. Análise SonarQube
 
