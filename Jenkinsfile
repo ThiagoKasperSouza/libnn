@@ -23,6 +23,15 @@
 pipeline {
     agent none
 
+    parameters {
+        booleanParam(
+            name: 'ENABLE_EXTERNAL_SCANS',
+            defaultValue: false,
+            description: 'Executa estágios SonarQube e Snyk (requer tokens reais). ' +
+                         'Desligado no smoke build local.'
+        )
+    }
+
     options {
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
         timestamps()
@@ -122,6 +131,9 @@ pipeline {
         }
 
         stage('SonarQube') {
+            when {
+                expression { params.ENABLE_EXTERNAL_SCANS }
+            }
             agent {
                 docker {
                     image "${env.IMAGE_SONAR}"
@@ -190,6 +202,9 @@ pipeline {
         }
 
         stage('Snyk') {
+            when {
+                expression { params.ENABLE_EXTERNAL_SCANS }
+            }
             agent {
                 docker {
                     image "${env.IMAGE_SNYK}"
@@ -238,7 +253,12 @@ pipeline {
             echo 'Pipeline falhou. Verifique os relatórios arquivados e o console.'
         }
         success {
-            echo 'Todos os estágios passaram: build, testes, sanitizers, bindings, SonarQube e Snyk.'
+            if (params.ENABLE_EXTERNAL_SCANS) {
+                echo 'Todos os estágios passaram: build, testes, sanitizers, cobertura, bindings, SonarQube e Snyk.'
+            } else {
+                echo 'Smoke build passou: build, testes, sanitizers, cobertura e bindings. ' +
+                     'SonarQube/Snyk pulados (ENABLE_EXTERNAL_SCANS=false).'
+            }
         }
     }
 }

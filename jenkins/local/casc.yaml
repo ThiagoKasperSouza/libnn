@@ -1,0 +1,56 @@
+jenkins:
+  systemMessage: "Jenkins local — smoke build do libnn (credenciais de teste)"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "admin"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              id: "sonar-token"
+              scope: GLOBAL
+              description: "Token SonarQube (dummy para smoke)"
+              secret: "dummy-sonar-token"
+          - string:
+              id: "snyk-token"
+              scope: GLOBAL
+              description: "Token Snyk (dummy para smoke)"
+              secret: "dummy-snyk-token"
+          - string:
+              id: "sonarqube-url"
+              scope: GLOBAL
+              description: "URL do SonarQube (dummy para smoke)"
+              secret: "http://sonarqube.invalid"
+
+jobs:
+  - script: |
+      def scmUrl = System.getenv('LIBNN_REPO_URL') ?: '/workspace'
+      pipelineJob('libnn-smoke') {
+        description('Pipeline libnn — smoke build local (Sonar/Snyk desabilitados)')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url(scmUrl)
+                }
+                branch('main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+          }
+        }
+        parameters {
+          booleanParam('ENABLE_EXTERNAL_SCANS', false,
+            'Habilita estágios SonarQube e Snyk (requer tokens reais)')
+        }
+      }

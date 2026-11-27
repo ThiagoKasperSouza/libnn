@@ -1,0 +1,8 @@
+workflow-aggregator:latest
+workflow-job:latest
+docker-workflow:latest
+sonar:latest
+configuration-as-code:latest
+job-dsl:latest
+credentials-binding:latest
+git:latest
