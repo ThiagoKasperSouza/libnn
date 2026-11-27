@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 libnn/__init__.py
 libnn/_core.py
+libnn/libnn_shared.so
 libnn.egg-info/PKG-INFO
 libnn.egg-info/SOURCES.txt
 libnn.egg-info/dependency_links.txt

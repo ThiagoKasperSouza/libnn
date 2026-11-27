@@ -130,3 +130,47 @@ def test_seed_is_deterministic():
 def test_version_and_path():
     assert nn.version() == "0.1.0"
     assert Path(nn.lib_path).name == "libnn_shared.so"
+
+
+def test_gan_constructor_and_step():
+    with nn.Arena(32 << 20) as model, nn.Arena(8 << 20) as scratch:
+        with nn.GAN(model, latent_dim=4, data_dim=6) as gan:
+            assert gan.generator is not None
+            assert gan.discriminator is not None
+            real = nn.Tensor(scratch, [2, 6])
+            real.fill_random_normal(0, 1)
+            gan.train_step(real, nn.Adam(lr=0.001), scratch)
+
+
+def test_sequence_forward_returns_list_of_tensors():
+    with nn.Arena(16 << 20) as model, nn.Arena(8 << 20) as scratch:
+        net = nn.Graph.lstm(model, 3, 4, 2)
+        x = nn.Tensor(scratch, [3, 2, 3])
+        x.fill_random_normal(0, 1)
+        outputs = net.sequence_forward(x, 3, scratch)
+        assert len(outputs) == 3
+        assert all(out.shape == (2, 2) for out in outputs)
+        net.sequence_backward()
+        net.reset_state()
+        net.destroy()
+
+
+def test_forward_tensor_invalidated_by_scratch_reset():
+    with nn.Arena(8 << 20) as model, nn.Arena(4 << 20) as scratch:
+        net = nn.Graph.ff(model, 3, 4, 1)
+        x = nn.Tensor(scratch, [1, 3], data=[[0.1, 0.2, 0.3]])
+        pred = net.forward(x, scratch)
+        assert pred.shape == (1, 1)
+        scratch.reset()
+        with pytest.raises(nn.LibNNError, match="tensor inválido"):
+            pred.tolist()
+        net.destroy()
+
+
+def test_render_svg_string_length():
+    with nn.Arena(8 << 20) as model:
+        net = nn.Graph.perceptron(model, 2, 1)
+        svg = net.to_svg()
+        assert len(svg) > 100
+        assert svg.startswith("<?xml")
+        net.destroy()

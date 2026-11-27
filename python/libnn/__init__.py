@@ -21,6 +21,7 @@ modelo. Fechar um ``with Arena`` com grafos ainda vivos gera ``LibNNError``.
 from __future__ import annotations
 
 import ctypes
+import weakref
 from ctypes import byref, c_bool, c_float, c_int, c_size_t, c_void_p
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -36,6 +37,7 @@ lib_path = _core.lib_path
 __all__ = [
     "Adam",
     "Arena",
+    "GAN",
     "Graph",
     "LibNNError",
     "Tensor",
@@ -93,6 +95,7 @@ class Arena:
             raise LibNNError("falha ao alocar arena")
         self._closed = False
         self._live_graphs: set[int] = set()
+        self._live_tensors = weakref.WeakSet()
 
     @property
     def bytes_used(self) -> int:
@@ -112,6 +115,9 @@ class Arena:
                 "não é possível resetar arena com grafos vivos: "
                 f"{len(self._live_graphs)} grafo(s)"
             )
+        for tensor in list(self._live_tensors):
+            tensor._alive = False
+        self._live_tensors.clear()
         _core.nc_arena_reset(byref(self._arena))
 
     def close(self) -> None:
@@ -122,6 +128,9 @@ class Arena:
                 "arena fechada com grafos ainda vivos. Destrua-os antes: "
                 f"{len(self._live_graphs)} grafo(s)."
             )
+        for tensor in list(self._live_tensors):
+            tensor._alive = False
+        self._live_tensors.clear()
         _core.nc_arena_free(byref(self._arena))
         self._closed = True
 
@@ -136,6 +145,12 @@ class Arena:
     def __exit__(self, exc_type, exc, tb) -> bool:
         if exc_type is None:
             self.close()
+        else:
+            # Não mascara a exceção original, mas libera a memória C.
+            try:
+                self.close()
+            except LibNNError:
+                pass
         return False
 
     def __del__(self):
@@ -178,7 +193,8 @@ class Tensor:
         )
         if not self._ptr:
             raise LibNNError("falha ao criar tensor (arena sem espaço?)")
-        self._owns_ptr = True
+        self._alive = True
+        arena._live_tensors.add(self)
 
         flat = _flatten(data) if data is not None else None
         if flat is not None:
@@ -191,12 +207,19 @@ class Tensor:
                 )
             self._copy_in(flat)
 
+    def _ensure_valid(self) -> None:
+        if not getattr(self, "_alive", False):
+            raise LibNNError("tensor inválido: arena scratch foi resetada/fechada")
+        self._arena._ensure_open()
+
     def _copy_in(self, flat: Sequence[float]) -> None:
+        self._ensure_valid()
         buf = (c_float * len(flat))(*[float(v) for v in flat])
         ctypes.memmove(self._ptr.contents.data, buf, len(flat) * ctypes.sizeof(c_float))
 
     def tolist(self):
         """Retorna os dados como lista aninhada segundo o shape."""
+        self._ensure_valid()
         shape = tuple(self._ptr.contents.shape[i] for i in range(self._ptr.contents.ndim))
         flat = [self._ptr.contents.data[i] for i in range(self._ptr.contents.size)]
 
@@ -212,22 +235,26 @@ class Tensor:
 
     @property
     def shape(self) -> tuple[int, ...]:
+        self._ensure_valid()
         return tuple(self._ptr.contents.shape[i] for i in range(self._ptr.contents.ndim))
 
     @property
     def data(self):
         """Acesso direto ao buffer (somente leitura é garantida pela API)."""
+        self._ensure_valid()
         return self._ptr.contents.data
 
     def fill_random_normal(self, mean: float = 0.0, stddev: float = 1.0) -> None:
+        self._ensure_valid()
         _core.nc_tensor_fill_random_normal(self._ptr, c_float(mean), c_float(stddev))
 
     def fill_zeros(self) -> None:
+        self._ensure_valid()
         _core.nc_tensor_fill_zeros(self._ptr)
 
     def close(self) -> None:
         """Marca o tensor como inutilizável. A memória é liberada pela arena."""
-        self._owns_ptr = False
+        self._alive = False
 
     def __repr__(self) -> str:
         return f"Tensor(shape={self.shape}, arena={hex(id(self._arena))})"
@@ -293,10 +320,10 @@ class Graph:
         self._arena._ensure_open()
 
     @classmethod
-    def _factory(cls, func, arena: Arena, *args) -> "Graph":
+    def _factory(cls, func, arena: Arena, *sizes: int) -> "Graph":
+        """Chama uma fábrica cujos argumentos são todos ``size_t``."""
         arena._ensure_open()
-        cargs = [byref(arena._arena)] + [c_size_t(a) if isinstance(a, int) else c_float(a) for a in args]
-        return cls(func(*cargs), arena)
+        return cls(func(byref(arena._arena), *[c_size_t(v) for v in sizes]), arena)
 
     # -- Fábricas feedforward ------------------------------------------------
     @classmethod
@@ -379,6 +406,8 @@ class Graph:
     ) -> float:
         """Executa perda MSE, backward e passo Adam. Retorna a perda."""
         self._ensure_alive()
+        pred._ensure_valid()
+        target._ensure_valid()
         loss = float(_core.nc_compute_mse_loss(pred._ptr, target._ptr))
         _core.nc_autograd_record_mse(c_void_p(self._ptr.contents.tape), pred._ptr, target._ptr)
         _core.nc_graph_backward(self._ptr)
@@ -413,6 +442,31 @@ class Graph:
     def hinge(self, x: Tensor, y: Tensor, C: float = 1.0) -> None:
         self._ensure_alive()
         _core.nc_train_kernel_hinge_loss(self._ptr, x._ptr, y._ptr, c_float(C))
+
+    def sequence_forward(self, x_seq: Tensor, steps: int, scratch: Arena) -> list[Tensor]:
+        """Desdobra `steps` passos (BPTT) e retorna as saídas de cada passo.
+
+        `x_seq` deve ter shape `[T, N, F]` com `T == steps`.
+        """
+        self._ensure_alive()
+        scratch._ensure_open()
+        if x_seq.shape[0] != steps:
+            raise ValueError(f"x_seq tem {x_seq.shape[0]} passos, esperado {steps}")
+        ptr = _core.nc_sequence_forward(
+            self._ptr, x_seq._ptr, c_size_t(steps), byref(scratch._arena)
+        )
+        if not ptr:
+            raise LibNNError("falha no forward sequencial")
+        return [_tensor_from_ptr(ptr[i], scratch) for i in range(steps)]
+
+    def sequence_backward(self) -> None:
+        self._ensure_alive()
+        _core.nc_sequence_backward(self._ptr)
+
+    def reset_state(self) -> None:
+        """Limpa estados recorrentes antes de nova sequência."""
+        self._ensure_alive()
+        _core.nc_sequence_reset_state(self._ptr)
 
     def render_svg(self, filename: str | Path) -> None:
         """Exporta a topologia para um arquivo SVG."""
@@ -458,12 +512,69 @@ class Graph:
             pass
 
 
+class GAN:
+    """Par gerador/discriminador da libnn (Marco 3).
+
+    Use como context manager para destruir ambos os grafos ao sair.
+    """
+
+    def __init__(self, arena: Arena, latent_dim: int, data_dim: int):
+        arena._ensure_open()
+        ptr = _core.nc_zoo_create_gan(
+            byref(arena._arena), c_size_t(latent_dim), c_size_t(data_dim)
+        )
+        if not ptr:
+            raise LibNNError("falha ao criar GAN")
+        self._ptr = ptr
+        self._arena = arena
+        self.generator = Graph(ptr.contents.generator, arena)
+        self.discriminator = Graph(ptr.contents.discriminator, arena)
+        self._alive = True
+
+    def train_step(self, real: Tensor, optimizer: Adam, scratch: Arena) -> None:
+        """Passo minimax: treina D com reais/falsos e G para enganar D."""
+        if not self._alive:
+            raise LibNNError("GAN já destruído")
+        self._arena._ensure_open()
+        scratch._ensure_open()
+        opt = optimizer._as_struct()
+        _core.nc_train_gan_step(
+            self.generator._ptr,
+            self.discriminator._ptr,
+            real._ptr,
+            byref(scratch._arena),
+            byref(opt),
+        )
+
+    def destroy(self) -> None:
+        if not self._alive:
+            return
+        self.generator.destroy()
+        self.discriminator.destroy()
+        self._alive = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.destroy()
+        return False
+
+    def __del__(self):
+        try:
+            if self._alive:
+                self.destroy()
+        except Exception:
+            pass
+
+
 # Permite construir um Tensor a partir de um ponteiro C sem alocar de novo.
 def _tensor_from_ptr(ptr, arena: Arena) -> Tensor:
     obj = Tensor.__new__(Tensor)
     obj._arena = arena
     obj._ptr = ptr
-    obj._owns_ptr = True
+    obj._alive = True
+    arena._live_tensors.add(obj)
     return obj
 
 

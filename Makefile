@@ -46,6 +46,7 @@ $(LIB): $(OBJS)
 # Biblioteca compartilhada para os bindings Python (ctypes).
 $(SHLIB): $(SRCS) $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -shared $(SRCS) -lm -o $@
+	cp $@ python/libnn/
 
 src/%.o: src/%.c $(HDRS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
@@ -112,4 +113,4 @@ valgrind: tests
 	fi
 
 clean:
-	rm -f $(OBJS) $(LIB) $(SHLIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES)
+	rm -f $(OBJS) $(LIB) $(SHLIB) python/libnn/$(SHLIB) $(TESTS) $(SAN_TESTS) $(EXAMPLES)

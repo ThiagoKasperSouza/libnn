@@ -13,5 +13,8 @@ dependencies = []
 [tool.setuptools]
 packages = ["libnn"]
 
+[tool.setuptools.package-data]
+libnn = ["libnn_shared.so"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

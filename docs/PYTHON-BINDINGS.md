@@ -60,8 +60,9 @@ with nn.Arena(16 << 20) as model, nn.Arena(4 << 20) as scratch:
 
 - **Arena**: `bytes_used`, `bytes_available`, `reset()`, `close()`, context manager.
 - **Tensor**: construtor com `data`, `tolist()`, `fill_zeros()`, `fill_random_normal()`.
-- **Graph**: 13 fábricas do zoo no ciclo essencial — `perceptron`, `ff`, `ae`, `dae`, `vae`, `hopfield`, `rbm`, `kohonen`, `elm`, `svm`, `rnn`, `lstm`, `gru`, `ntm`.
-- **Treinadores**: `train_backprop`, `contrastive_divergence`, `hebbian`, `stdp`, `ridge`, `kohonen_step`, `hinge`.
+- **Graph**: 15 construtores do ciclo essencial — `perceptron`, `ff`, `ae`, `dae`, `vae`, `hopfield`, `rbm`, `kohonen`, `elm`, `svm`, `rnn`, `lstm`, `gru`, `ntm` e `GAN` (classe separada, com `train_step`).
+- **Sequências**: `sequence_forward(x_seq, steps, scratch)` → lista de tensores, `sequence_backward()`, `reset_state()`.
+- **Treinadores**: `train_backprop`, `contrastive_divergence`, `hebbian`, `stdp`, `ridge`, `kohonen_step`, `hinge`, `GAN.train_step`.
 - **Render**: `render_svg(path)` e `to_svg()`.
 - **RNG**: `seed()` / `set_seed()`.
 
@@ -79,10 +80,16 @@ make test / make asan             → suíte C intacta (8 binários)
 - Tensores de baixo nível (matmul, conv, im2col) não têm wrapper Python nesta versão.
 - `NC_Graph` é parcialmente opaco no ctypes: apenas os campos até `tape` são
   expostos, pois o wrapper precisa do tape para gravar a perda MSE.
-- O tensor retornado por `forward` vive na arena scratch; chamadas a
-  `scratch.reset()` o invalidam. O wrapper não rastreia esse ciclo de vida.
-- A API cobre 14 fábricas do zoo; as demais (DCN, DN, DCIGN, DBN, DRN, DFF,
-  LSM, ESN, RBF, Boltzmann, Markov) podem ser adicionadas incrementalmente.
+- `nc_sequence_forward` retorna `NC_Tensor **`; o binding usa
+  `POINTER(POINTER(NC_Tensor))` e a API devolve uma lista de `Tensor`.
+- O tensor retornado por `forward` vive na arena scratch. `scratch.reset()`
+  invalida esses tensores e qualquer acesso posterior levanta `LibNNError`
+  (em vez de use-after-free silencioso). Use o tensor antes do próximo reset.
+- O escopo aprovado é o ciclo essencial. Não são expostos em Python:
+  `nc_arena_alloc`, `nc_arena_contains`, `nc_graph_step`, `nc_graph_zero_grads`,
+  `nc_graph_ensure_adam_states`, `nc_graph_cell_count`, operações `nc_nn_*`,
+  `nc_matmul` e `nc_tensor_flatten`. As fábricas restantes do zoo (DCN, DN,
+  DCIGN, DBN, DRN, DFF, LSM, ESN, RBF, Boltzmann, Markov) podem entrar depois.
 
 ## 7. Próximos passos
 

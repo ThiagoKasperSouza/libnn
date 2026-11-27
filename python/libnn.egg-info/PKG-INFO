@@ -57,11 +57,12 @@ with nn.Arena(16 << 20) as model, nn.Arena(4 << 20) as scratch:
 | :-- | :-- |
 | `Arena(capacity)` | Arena de memória; context manager; `reset()`, `bytes_used` |
 | `Tensor(arena, shape, data=...)` | Tensor contíguo; `tolist()`, `fill_random_normal()` |
-| `Graph.ff/ae/dae/vae/...` | Fábricas do zoo (ciclo essencial) |
+| `Graph.ff/ae/dae/vae/...` / `GAN` | Construtores do ciclo essencial (inclui GAN) |
 | `Graph.forward(x, scratch)` | Forward; retorna `Tensor` |
 | `Graph.train_backprop(pred, y, opt, scratch)` | MSE + backward + Adam; retorna a perda |
 | `Graph.contrastive_divergence/hebbian/stdp/ridge/kohonen_step/hinge` | Treinadores não-diferenciáveis |
 | `Graph.render_svg(path)` / `to_svg()` | Exportação SVG |
+| `Graph.sequence_forward/backward/reset_state` | BPTT e estados recorrentes |
 | `Adam(lr, beta1, beta2, epsilon)` | Hiperparâmetros do otimizador |
 | `seed(value)` | Semente determinística do RNG |
 | `LibNNError` | Exceção para falhas da biblioteca C |
@@ -70,7 +71,8 @@ with nn.Arena(16 << 20) as model, nn.Arena(4 << 20) as scratch:
 
 O grafo **empresta** a arena do modelo. Fechar `with Arena(...)` com grafos
 ainda vivos levanta `LibNNError`. Use `graph.destroy()` ou o próprio grafo como
-context manager:
+context manager. Tensores retornados por `forward` vivem na arena scratch:
+`scratch.reset()` os invalida e qualquer uso posterior levanta `LibNNError`.
 
 ```python
 with nn.Arena(8 << 20) as model:
@@ -80,8 +82,9 @@ with nn.Arena(8 << 20) as model:
 
 ## Escopo da primeira versão
 
-Inclui o ciclo essencial: construtores do zoo, forward, treinadores e render.
-Tensores de baixo nível (matmul, conv, im2col) permanecem disponíveis apenas em C.
+Inclui o ciclo essencial: 15 construtores (com GAN), forward e BPTT, treinadores
+(inclusive o passo adversarial) e render. Tensores de baixo nível (matmul,
+conv, im2col) e as operações `nc_nn_*` permanecem disponíveis apenas em C.
 
 ## Testes
 

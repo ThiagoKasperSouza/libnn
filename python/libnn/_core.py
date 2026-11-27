@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import os
-from ctypes import POINTER, c_bool, c_char_p, c_float, c_int, c_size_t, c_void_p
+from ctypes import POINTER, c_bool, c_char_p, c_float, c_int, c_long, c_size_t, c_void_p
 from pathlib import Path
 
 
@@ -102,6 +102,14 @@ ArenaPtr = POINTER(NC_Arena)
 TensorPtr = POINTER(NC_Tensor)
 GraphPtr = POINTER(NC_Graph)
 
+class NC_GAN(ctypes.Structure):
+    _fields_ = [
+        ("generator", GraphPtr),
+        ("discriminator", GraphPtr),
+    ]
+
+
+
 
 # ---------------------------------------------------------------------------
 # Assinaturas
@@ -151,15 +159,16 @@ _bind(
 )
 _bind("nc_train_kohonen_bmu_step", None, [GraphPtr, TensorPtr, c_float, c_float])
 _bind("nc_train_kernel_hinge_loss", None, [GraphPtr, TensorPtr, TensorPtr, c_float])
+_bind("nc_train_gan_step", None, [GraphPtr, GraphPtr, TensorPtr, ArenaPtr, c_void_p])
 
 # Sequências (Marco 4)
-_bind("nc_sequence_forward", TensorPtr, [GraphPtr, TensorPtr, c_size_t, ArenaPtr])
+_bind("nc_sequence_forward", POINTER(TensorPtr), [GraphPtr, TensorPtr, c_size_t, ArenaPtr])
 _bind("nc_sequence_backward", None, [GraphPtr])
 _bind("nc_sequence_reset_state", None, [GraphPtr])
 
 # Render (Marco 6)
 _bind("nc_render_svg", c_int, [GraphPtr, c_char_p])
-_bind("nc_render_svg_string", c_int, [GraphPtr, c_char_p, c_size_t])
+_bind("nc_render_svg_string", c_long, [GraphPtr, c_char_p, c_size_t])
 
 # Fábricas do zoo -----------------------------------------------------------
 _zoo_2i = [
@@ -182,7 +191,7 @@ _zoo_3i = [
     "nc_zoo_create_rbf",
 ]
 for _name in _zoo_3i:
-    _bind(_name, GraphPtr, [ArenaPtr, c_size_t, c_size_t, c_float if _name == "nc_zoo_create_dae" else c_size_t])
+    _bind(_name, GraphPtr, [ArenaPtr, c_size_t, c_size_t, c_size_t])
 
 _bind("nc_zoo_create_ff", GraphPtr, [ArenaPtr, c_size_t, c_size_t, c_size_t])
 _bind("nc_zoo_create_dae", GraphPtr, [ArenaPtr, c_size_t, c_size_t, c_float])
@@ -191,6 +200,7 @@ _bind("nc_zoo_create_svm", GraphPtr, [ArenaPtr, c_size_t])
 
 _zoo_hopfield = "nc_zoo_create_hopfield"
 _bind(_zoo_hopfield, GraphPtr, [ArenaPtr, c_size_t])
+_bind("nc_zoo_create_gan", POINTER(NC_GAN), [ArenaPtr, c_size_t, c_size_t])
 _bind("nc_zoo_create_kohonen", GraphPtr, [ArenaPtr, c_size_t, c_size_t])
 _bind("nc_zoo_create_vae", GraphPtr, [ArenaPtr, c_size_t, c_size_t])
 _bind("nc_zoo_create_ntm", GraphPtr, [ArenaPtr, c_size_t, c_size_t, c_size_t, c_size_t])
@@ -210,6 +220,7 @@ __all__ = [
     "NC_Arena",
     "NC_Tensor",
     "NC_Graph",
+    "NC_GAN",
     "ArenaPtr",
     "TensorPtr",
     "GraphPtr",
