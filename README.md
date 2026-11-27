@@ -84,7 +84,11 @@ libnn/
 │   ├── MARCO5.md
 │   ├── MARCO6.md
 │   ├── PYTHON-BINDINGS.md
-│   └── gallery/         # index.html + data.js + svgs/ (27 diagramas)
+│   ├── gallery/         # index.html + data.js + svgs/ (27 diagramas)
+│   └── JENKINS-PIPELINE.md
+├── Jenkinsfile           # CI: Docker + SonarQube + Snyk
+├── sonar-project.properties
+├── ci/                    # Dockerfile.sonar + README
 ├── Makefile
 └── README.md
 ```
@@ -226,6 +230,8 @@ python3 python/examples/xor.py
 ```
 
 Galeria interativa das 27 arquiteturas: [`docs/gallery/index.html`](./docs/gallery/index.html).
+
+CI com Jenkins, SonarQube e Snyk: [`docs/JENKINS-PIPELINE.md`](./docs/JENKINS-PIPELINE.md).
 
 Ver [`python/README.md`](./python/README.md), [`docs/PYTHON-BINDINGS.md`](./docs/PYTHON-BINDINGS.md) e [`docs/gallery/README.md`](./docs/gallery/README.md).
 

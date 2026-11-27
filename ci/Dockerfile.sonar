@@ -1,0 +1,32 @@
+# Imagem de CI para o estágio SonarQube do Jenkinsfile.
+#
+# Build (em qualquer host com Docker):
+#   docker build -f ci/Dockerfile.sonar -t libnn-ci-sonar:latest .
+#
+# A imagem parte da imagem oficial do sonar-scanner-cli (que já traz JRE e o
+# scanner) e adiciona:
+#   - toolchain C (gcc/make) para `make lib`
+#   - build-wrapper do SonarQube CFamily (captura os comandos de compilação)
+#
+# Para SonarQube on-prem, aponte BUILD_WRAPPER_URL para o zip disponível em
+# Administration → Tools & Settings → C/C++ do seu servidor.
+
+FROM sonarsource/sonar-scanner-cli:latest
+
+USER root
+
+ARG BUILD_WRAPPER_URL="https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip"
+
+RUN yum install -y --setopt=install_weak_deps=False \
+        unzip gcc make glibc-devel \
+    && yum clean all \
+    && curl -fsSL -o /tmp/bw.zip "${BUILD_WRAPPER_URL}" \
+    && unzip -q /tmp/bw.zip -d /opt \
+    && rm /tmp/bw.zip \
+    && find /opt -name 'build-wrapper-linux-x86-64' -type f -exec chmod +x {} \; \
+    && ln -sf "$(find /opt -name 'build-wrapper-linux-x86-64' -type f | head -1)" \
+       /usr/local/bin/build-wrapper-linux-x86-64
+
+WORKDIR /workspace
+
+CMD ["sonar-scanner", "--version"]
