@@ -62,6 +62,7 @@ class NC_Arena(ctypes.Structure):
         ("buffer", POINTER(c_void_p)),
         ("capacity", c_size_t),
         ("offset", c_size_t),
+        ("raw", c_void_p),  # ponteiro original de malloc(), para nc_arena_free
     ]
 
 

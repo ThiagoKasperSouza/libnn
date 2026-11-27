@@ -26,6 +26,7 @@ typedef struct {
     uint8_t *buffer;
     size_t capacity;
     size_t offset;
+    void *raw; /* ponteiro original de malloc(), usado por nc_arena_free() */
 } NC_Arena;
 
 /* Aloca `capacity_in_bytes` alinhados. Retorna uma arena zerada em caso de falha. */

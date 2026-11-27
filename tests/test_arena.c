@@ -162,6 +162,43 @@ static void test_alignment_contract_and_contains(void)
     NC_CHECK(!nc_arena_contains(&arena, p));
 }
 
+/* Garante que inicialização/liberação com diferentes tamanhos não escreve
+ * fora da região alocada (ASan detecta qualquer desvio). */
+static void test_init_free_stress_boundaries(void)
+{
+    const size_t caps[] = {
+        1, 2, 7, 8, 15, 16, 31, 32, 33, 63, 64, 65,
+        127, 128, 129, 1023, 1024, 4095, 4096,
+    };
+    for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]); ++i) {
+        NC_Arena arena = nc_arena_init(caps[i]);
+        NC_CHECK(arena.buffer != NULL);
+        NC_CHECK(arena.raw != NULL);
+        NC_CHECK(arena.capacity == caps[i]);
+        NC_CHECK(((uintptr_t)arena.buffer % NC_ARENA_ALIGNMENT) == 0);
+
+        /* Consome toda a capacidade, um byte por vez. O último byte escrito
+         * é o último da região alocada — ASan detecta qualquer desvio. */
+        size_t allocated = 0;
+        while (allocated < caps[i]) {
+            uint8_t *p = (uint8_t *)nc_arena_alloc(&arena, 1, 1);
+            NC_CHECK(p != NULL);
+            if (p == NULL) break;
+            *p = 0xAB;
+            ++allocated;
+        }
+        NC_CHECK(allocated == caps[i]);
+        NC_CHECK(arena.buffer[arena.capacity - 1] == 0xAB);
+
+        /* Não deve sobrar espaço para mais um byte. */
+        NC_CHECK(nc_arena_alloc(&arena, 1, 1) == NULL);
+
+        nc_arena_free(&arena);
+        NC_CHECK(arena.buffer == NULL);
+        NC_CHECK(arena.raw == NULL);
+    }
+}
+
 int main(void)
 {
     printf("=== test_arena (Marco 1) ===\n");
@@ -171,5 +208,6 @@ int main(void)
     test_stress_many_small_allocations();
     test_edge_cases();
     test_alignment_contract_and_contains();
+    test_init_free_stress_boundaries();
     NC_TEST_SUMMARY("test_arena");
 }
