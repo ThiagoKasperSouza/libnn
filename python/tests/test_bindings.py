@@ -174,3 +174,48 @@ def test_render_svg_string_length():
         assert len(svg) > 100
         assert svg.startswith("<?xml")
         net.destroy()
+
+
+def test_remaining_zoo_factories():
+    with nn.Arena(64 << 20) as model:
+        factories = [
+            lambda: nn.Graph.dff(model, 4, [8, 6], 2),
+            lambda: nn.Graph.drn(model, 4, [8, 6], 2),
+            lambda: nn.Graph.dbn(model, 4, [6, 4]),
+            lambda: nn.Graph.boltzmann(model, 4, 3),
+            lambda: nn.Graph.markov_chain(model, 4, 3),
+            lambda: nn.Graph.lsm(model, 4, 8, 2),
+            lambda: nn.Graph.esn(model, 4, 8, 2),
+            lambda: nn.Graph.rbf(model, 4, 6, 2),
+            lambda: nn.Graph.dcn(model, 1, 4, 4, 3),
+            lambda: nn.Graph.dn(model, 1, 4, 4),
+            lambda: nn.Graph.dcign(model, 1, 4, 4, 2),
+        ]
+        for make in factories:
+            graph = make()
+            assert graph is not None
+            graph.destroy()
+
+
+def test_hidden_dims_validation():
+    with nn.Arena(8 << 20) as model:
+        with pytest.raises(ValueError):
+            nn.Graph.dff(model, 4, [], 2)
+        with pytest.raises(ValueError):
+            nn.Graph.drn(model, 4, [0], 2)
+        with pytest.raises(ValueError):
+            nn.Graph.dbn(model, 4, [])
+
+
+def test_all_zoo_factories_render_svg():
+    """Toda fábrica do zoo deve gerar um SVG válido."""
+    with nn.Arena(64 << 20) as model:
+        graphs = [
+            nn.Graph.dcn(model, 1, 4, 4, 3),
+            nn.Graph.lsm(model, 4, 8, 2),
+            nn.Graph.boltzmann(model, 4, 3),
+        ]
+        for graph in graphs:
+            svg = graph.to_svg()
+            assert svg.startswith("<?xml") and "</svg>" in svg
+            graph.destroy()

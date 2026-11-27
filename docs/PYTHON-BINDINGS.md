@@ -60,7 +60,21 @@ with nn.Arena(16 << 20) as model, nn.Arena(4 << 20) as scratch:
 
 - **Arena**: `bytes_used`, `bytes_available`, `reset()`, `close()`, context manager.
 - **Tensor**: construtor com `data`, `tolist()`, `fill_zeros()`, `fill_random_normal()`.
-- **Graph**: 15 construtores do ciclo essencial — `perceptron`, `ff`, `ae`, `dae`, `vae`, `hopfield`, `rbm`, `kohonen`, `elm`, `svm`, `rnn`, `lstm`, `gru`, `ntm` e `GAN` (classe separada, com `train_step`).
+- **Graph**: **todas as 27 arquiteturas do zoo** estão disponíveis:
+
+  | Grupo | Fábricas Python |
+  | :-- | :-- |
+  | Feedforward | `perceptron`, `ff`, `dff`, `drn` |
+  | Autoencoders | `ae`, `dae`, `sae`, `vae`, `dcign` |
+  | Energia | `boltzmann`, `markov_chain`, `rbm`, `dbn`, `hopfield` |
+  | Competitivo | `kohonen`, `rbf`, `svm` |
+  | Reservatório | `elm`, `esn`, `lsm` |
+  | Recorrentes | `rnn`, `lstm`, `gru`, `ntm` |
+  | Convolucionais | `dcn`, `dn` |
+  | Adversarial | `GAN` (classe separada, com `train_step`) |
+
+  Fábricas com dimensões ocultas (`dff`, `drn`, `dbn`) recebem uma sequência
+  de inteiros, por exemplo `Graph.dff(model, 4, [8, 6], 2)`.
 - **Sequências**: `sequence_forward(x_seq, steps, scratch)` → lista de tensores, `sequence_backward()`, `reset_state()`.
 - **Treinadores**: `train_backprop`, `contrastive_divergence`, `hebbian`, `stdp`, `ridge`, `kohonen_step`, `hinge`, `GAN.train_step`.
 - **Render**: `render_svg(path)` e `to_svg()`.
@@ -85,14 +99,13 @@ make test / make asan             → suíte C intacta (8 binários)
 - O tensor retornado por `forward` vive na arena scratch. `scratch.reset()`
   invalida esses tensores e qualquer acesso posterior levanta `LibNNError`
   (em vez de use-after-free silencioso). Use o tensor antes do próximo reset.
-- O escopo aprovado é o ciclo essencial. Não são expostos em Python:
-  `nc_arena_alloc`, `nc_arena_contains`, `nc_graph_step`, `nc_graph_zero_grads`,
-  `nc_graph_ensure_adam_states`, `nc_graph_cell_count`, operações `nc_nn_*`,
-  `nc_matmul` e `nc_tensor_flatten`. As fábricas restantes do zoo (DCN, DN,
-  DCIGN, DBN, DRN, DFF, LSM, ESN, RBF, Boltzmann, Markov) podem entrar depois.
+- Não são expostos em Python: `nc_arena_alloc`, `nc_arena_contains`,
+  `nc_graph_step`, `nc_graph_zero_grads`, `nc_graph_ensure_adam_states`,
+  `nc_graph_cell_count`, operações `nc_nn_*`, `nc_matmul` e
+  `nc_tensor_flatten`. As 27 fábricas do zoo, por outro lado, estão todas
+  cobertas.
 
 ## 7. Próximos passos
 
-1. Cobrir as fábricas restantes do zoo.
-2. Expor tensores de baixo nível e operações de álgebra linear.
+1. Expor tensores de baixo nível e operações de álgebra linear.
 3. Gerenciar o ciclo de vida do tensor de saída em relação ao `scratch.reset()`.

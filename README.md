@@ -215,7 +215,8 @@ Exemplos completos: o índice em [`examples/README.md`](./examples/README.md) li
 ## Bindings Python
 
 Wrapper `ctypes` sobre a biblioteca compartilhada, com API Pythonic
-(`Arena`, `Tensor`, `Graph`, `Adam`) e exportação SVG:
+(`Arena`, `Tensor`, `Graph`, `Adam`), todas as 27 arquiteturas do zoo e
+exportação SVG:
 
 ```sh
 make lib

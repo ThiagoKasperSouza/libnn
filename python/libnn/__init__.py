@@ -325,6 +325,28 @@ class Graph:
         arena._ensure_open()
         return cls(func(byref(arena._arena), *[c_size_t(v) for v in sizes]), arena)
 
+    @classmethod
+    def _factory_hidden(cls, func, arena: Arena, input_dim: int,
+                        hidden_dims: Sequence[int], output_dim: int) -> "Graph":
+        """Chama uma fábrica com array `const size_t hidden_dims[]`."""
+        arena._ensure_open()
+        dims = [int(d) for d in hidden_dims]
+        if not dims:
+            raise ValueError("hidden_dims não pode ser vazio")
+        if any(d <= 0 for d in dims):
+            raise ValueError("dimensões ocultas devem ser positivas")
+        arr = _c_size_array(dims)
+        return cls(
+            func(
+                byref(arena._arena),
+                c_size_t(input_dim),
+                arr,
+                c_size_t(len(dims)),
+                c_size_t(output_dim),
+            ),
+            arena,
+        )
+
     # -- Fábricas feedforward ------------------------------------------------
     @classmethod
     def perceptron(cls, arena, input_dim, output_dim):
@@ -333,6 +355,18 @@ class Graph:
     @classmethod
     def ff(cls, arena, input_dim, hidden_dim, output_dim):
         return cls._factory(_core.lib.nc_zoo_create_ff, arena, input_dim, hidden_dim, output_dim)
+
+    @classmethod
+    def dff(cls, arena, input_dim, hidden_dims, output_dim):
+        return cls._factory_hidden(
+            _core.lib.nc_zoo_create_dff, arena, input_dim, hidden_dims, output_dim
+        )
+
+    @classmethod
+    def drn(cls, arena, input_dim, hidden_dims, output_dim):
+        return cls._factory_hidden(
+            _core.lib.nc_zoo_create_drn, arena, input_dim, hidden_dims, output_dim
+        )
 
     @classmethod
     def ae(cls, arena, input_dim, hidden_dim):
@@ -360,12 +394,43 @@ class Graph:
         return cls._factory(_core.lib.nc_zoo_create_rbm, arena, visible, hidden)
 
     @classmethod
+    def boltzmann(cls, arena, visible, hidden):
+        return cls._factory(_core.lib.nc_zoo_create_boltzmann, arena, visible, hidden)
+
+    @classmethod
+    def markov_chain(cls, arena, states, hidden):
+        return cls._factory(_core.lib.nc_zoo_create_markov_chain, arena, states, hidden)
+
+    @classmethod
+    def dbn(cls, arena, visible, hidden_dims):
+        arena._ensure_open()
+        dims = [int(d) for d in hidden_dims]
+        if not dims or any(d <= 0 for d in dims):
+            raise ValueError("hidden_dims inválido")
+        ptr = _core.lib.nc_zoo_create_dbn(
+            byref(arena._arena), c_size_t(visible), _c_size_array(dims), c_size_t(len(dims))
+        )
+        return cls(ptr, arena)
+
+    @classmethod
     def kohonen(cls, arena, input_dim, neurons):
         return cls._factory(_core.lib.nc_zoo_create_kohonen, arena, input_dim, neurons)
 
     @classmethod
     def elm(cls, arena, input_dim, neurons, output_dim):
         return cls._factory(_core.lib.nc_zoo_create_elm, arena, input_dim, neurons, output_dim)
+
+    @classmethod
+    def lsm(cls, arena, input_dim, neurons, output_dim):
+        return cls._factory(_core.lib.nc_zoo_create_lsm, arena, input_dim, neurons, output_dim)
+
+    @classmethod
+    def esn(cls, arena, input_dim, neurons, output_dim):
+        return cls._factory(_core.lib.nc_zoo_create_esn, arena, input_dim, neurons, output_dim)
+
+    @classmethod
+    def rbf(cls, arena, input_dim, centers, output_dim):
+        return cls._factory(_core.lib.nc_zoo_create_rbf, arena, input_dim, centers, output_dim)
 
     @classmethod
     def svm(cls, arena, input_dim):
@@ -387,6 +452,21 @@ class Graph:
     @classmethod
     def ntm(cls, arena, input_dim, slots, mem_dim, output_dim):
         return cls._factory(_core.lib.nc_zoo_create_ntm, arena, input_dim, slots, mem_dim, output_dim)
+
+    # -- Convolucionais ------------------------------------------------------
+    @classmethod
+    def dcn(cls, arena, channels, h, w, num_classes):
+        return cls._factory(_core.lib.nc_zoo_create_dcn, arena, channels, h, w, num_classes)
+
+    @classmethod
+    def dn(cls, arena, channels, h, w):
+        return cls._factory(_core.lib.nc_zoo_create_dn, arena, channels, h, w)
+
+    @classmethod
+    def dcign(cls, arena, channels, h, w, latent_channels):
+        return cls._factory(
+            _core.lib.nc_zoo_create_dcign, arena, channels, h, w, latent_channels
+        )
 
     # -- Operações -----------------------------------------------------------
     def forward(self, x: Tensor, scratch: Arena) -> Tensor:

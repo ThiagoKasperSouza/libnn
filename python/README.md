@@ -50,7 +50,7 @@ with nn.Arena(16 << 20) as model, nn.Arena(4 << 20) as scratch:
 | :-- | :-- |
 | `Arena(capacity)` | Arena de memória; context manager; `reset()`, `bytes_used` |
 | `Tensor(arena, shape, data=...)` | Tensor contíguo; `tolist()`, `fill_random_normal()` |
-| `Graph.ff/ae/dae/vae/...` / `GAN` | Construtores do ciclo essencial (inclui GAN) |
+| `Graph.*` / `GAN` | Todas as 27 arquiteturas do zoo (inclui GAN) |
 | `Graph.forward(x, scratch)` | Forward; retorna `Tensor` |
 | `Graph.train_backprop(pred, y, opt, scratch)` | MSE + backward + Adam; retorna a perda |
 | `Graph.contrastive_divergence/hebbian/stdp/ridge/kohonen_step/hinge` | Treinadores não-diferenciáveis |
@@ -75,9 +75,16 @@ with nn.Arena(8 << 20) as model:
 
 ## Escopo da primeira versão
 
-Inclui o ciclo essencial: 15 construtores (com GAN), forward e BPTT, treinadores
-(inclusive o passo adversarial) e render. Tensores de baixo nível (matmul,
-conv, im2col) e as operações `nc_nn_*` permanecem disponíveis apenas em C.
+Inclui todas as 27 arquiteturas do zoo, forward e BPTT, treinadores
+(inclusive o passo adversarial) e render. Fábricas com múltiplas camadas
+ocultas (`dff`, `drn`, `dbn`) recebem uma lista de dimensões:
+
+```python
+net = nn.Graph.dff(model, input_dim=4, hidden_dims=[8, 6], output_dim=2)
+```
+
+Tensores de baixo nível (matmul, conv, im2col) e as operações `nc_nn_*`
+permanecem disponíveis apenas em C.
 
 ## Testes
 
