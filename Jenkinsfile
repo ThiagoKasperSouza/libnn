@@ -34,7 +34,6 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
-        timestamps()
         timeout(time: 45, unit: 'MINUTES')
         disableConcurrentBuilds()
         skipDefaultCheckout(true)
@@ -253,11 +252,11 @@ pipeline {
             echo 'Pipeline falhou. Verifique os relatórios arquivados e o console.'
         }
         success {
-            if (params.ENABLE_EXTERNAL_SCANS) {
-                echo 'Todos os estágios passaram: build, testes, sanitizers, cobertura, bindings, SonarQube e Snyk.'
-            } else {
-                echo 'Smoke build passou: build, testes, sanitizers, cobertura e bindings. ' +
-                     'SonarQube/Snyk pulados (ENABLE_EXTERNAL_SCANS=false).'
+            script {
+                def msg = params.ENABLE_EXTERNAL_SCANS
+                    ? 'Todos os estágios passaram: build, testes, sanitizers, cobertura, bindings, SonarQube e Snyk.'
+                    : 'Smoke build passou: build, testes, sanitizers, cobertura e bindings. SonarQube/Snyk pulados.'
+                echo msg
             }
         }
     }
